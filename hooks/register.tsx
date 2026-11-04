@@ -13,10 +13,94 @@ const agents = atom({ plugin: 'pixel-agent', key: 'agents' } as const, [] as Age
 // yalnız geçişte yazılır; boşta süresi frame farkından hesaplanır.
 const idleStart = atom({ plugin: 'pixel-agent', key: 'idleStart' } as const, -1)
 const theme = atom({ plugin: 'pixel-agent', key: 'theme' } as const, 'classic')
-const ctx = atom({ plugin: 'pixel-agent', key: 'ctx' } as const, -1)
+// ---HAREKET-START---
+// `theme auto` açık mı; theme atomuna 'auto' yazılmaz, tema saate göre bu bayrakla seçilir
+const themeAuto = atom({ plugin: 'pixel-agent', key: 'themeAuto' } as const, false)
+// Saat (yerel) -> tema: sabah ocean, gün classic, akşam ember, gece mono
+function autoThemeFor(hour: number): string {
+  if (hour >= 6 && hour < 11) return 'ocean'
+  if (hour >= 11 && hour < 17) return 'classic'
+  if (hour >= 17 && hour < 21) return 'ember'
 
-// Bağlam bu yüzdeyi aşınca karakter yorgun görünür, çubuk kırmızıya döner
-const CTX_WARN = 60
+  return 'mono'
+}
+// ---HAREKET-END---
+const ctx = atom({ plugin: 'pixel-agent', key: 'ctx' } as const, -1)
+// /pixel-agent switch ile açılan karakter listesi (Select) görünüyor mu
+const picking = atom({ plugin: 'pixel-agent', key: 'picking' } as const, false)
+// ---BAĞ-START--- (atomlar)
+// Karakter başına bağ puanı (başarılı tur sayısı) ve karakter başına seçili şapka
+const bondPoints = atom({ plugin: 'pixel-agent', key: 'bondPoints' } as const, {} as Record<string, number>)
+const bondHats = atom({ plugin: 'pixel-agent', key: 'bondHats' } as const, {} as Record<string, string>)
+// /pixel-agent hat ile açılan şapka listesi (Select) görünüyor mu
+const bondHatPicking = atom({ plugin: 'pixel-agent', key: 'bondHatPicking' } as const, false)
+// Uzun aradan sonra bantta kısa süre görünen karşılama metni ('' = yok)
+const bondWelcome = atom({ plugin: 'pixel-agent', key: 'bondWelcome' } as const, '')
+// ---BAĞ-END---
+
+// ---BALON-START---
+// Konuşma balonu: sabit tablodan tek satırlık tepki. Metin araç adının saf fonksiyonudur,
+// bu yüzden aynı araçta sabit kalır, araç değişince güncellenir.
+// Ardışık başarısız araç sayısı (başarıda ve yeni istekte sıfırlanır)
+const balonErrStreak = atom({ plugin: 'pixel-agent', key: 'balonErrStreak' } as const, 0)
+// Biten tur sayısı; "bitti" varyasyonunu seçer ve tur boyunca sabit tutar
+const balonTurns = atom({ plugin: 'pixel-agent', key: 'balonTurns' } as const, 0)
+// /pixel-agent chatter ile açılıp kapanır; kalıcıdır
+const balonOn = atom({ plugin: 'pixel-agent', key: 'balonOn' } as const, true)
+
+// Bu kadar ardışık hatadan sonra "tekrar deneyelim" balonu çıkar
+const BALON_ERR_STREAK = 3
+// Balon için sağ sütunda gereken en az genişlik (hücre); daha darsa çizilmez
+const BALON_MIN_W = 16
+
+const BALON_TOOLS: Record<string, string> = {
+  bash: 'into the terminal',
+  powershell: 'into the terminal',
+  read: 'reading up',
+  edit: 'making changes',
+  multiedit: 'making changes',
+  write: 'making changes',
+  notebookedit: 'making changes',
+  grep: 'on the hunt',
+  glob: 'on the hunt',
+  webfetch: 'off to the web',
+  websearch: 'off to the web',
+  agent: 'calling a helper',
+  task: 'calling a helper',
+  todowrite: 'ticking things off',
+}
+
+const BALON_DONE = ['done', 'all done', 'done and dusted', 'ready for more']
+
+// Tablo dışı (MCP vb.) araçlar adın içeriğine göre gruplanır; tanınmayana genel metin
+function balonForTool(tool: string): string {
+  const t = tool.toLowerCase()
+  const exact = BALON_TOOLS[t]
+
+  if (exact) return exact
+  if (/web|browser|navigate|fetch|chrome|playwright/.test(t)) return 'off to the web'
+  if (/grep|glob|search|explore|find|query/.test(t)) return 'on the hunt'
+  if (/bash|powershell|shell/.test(t)) return 'into the terminal'
+  if (/edit|write|notebook|replace|insert/.test(t)) return 'making changes'
+  if (/read|view/.test(t)) return 'reading up'
+
+  return 'working on it'
+}
+
+type BalonIn = { on: boolean; m: Mode; tool: string; streak: number; tired: boolean; turns: number }
+
+// Boşta/uyurken (m === 'idle') ve kapalıyken balon yok. Öncelik: hata serisi > yorgunluk > araç.
+function balonText(i: BalonIn): string {
+  if (!i.on || i.m === 'idle') return ''
+  if (i.m === 'ok') return BALON_DONE[i.turns % BALON_DONE.length] ?? 'done'
+  if (i.streak >= BALON_ERR_STREAK) return "hmm, let's try again"
+  if (i.tired) return 'my head is getting full'
+
+  return i.tool ? balonForTool(i.tool) : 'thinking it over'
+}
+// ---BALON-END---
+
+// Bağlam bu yüzdeyi aşınca karakter yorgun görünür
 const CTX_TIRED = 85
 
 const TICK_MS = 450
@@ -71,6 +155,8 @@ type Spec = {
   narrow?: boolean
   // Temada yeniden renklendirilmeyen palet harfleri (aksesuar, ten, sakal gibi vurgu renkleri)
   keep?: string
+  // Hata gözü (X) rengi; gövde kırmızıya yakınsa (turuncu, yeşil) okunsun diye. Varsayılan RED
+  errEye?: string
 }
 
 const WHITE = '#FFFFFF'
@@ -244,14 +330,429 @@ const BULUT: Spec = {
   line: '#4A6A85',
 }
 
+// 6) Kedi: sivri kulaklı turuncu tekir, beyaz çene
+const KEDI: Spec = {
+  title: 'Cat',
+  palette: { O: '#4A2C1A', h: '#F6B26B', m: '#E8903C', k: '#B8661F', w: '#FFF1DC', p: '#F4A6A6' },
+  half: [
+    '.O.....',
+    '.OpO...',
+    '.OmmOOO',
+    '.Ohhhhh',
+    'Ohmmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Omwwwww',
+    'Okwwwww',
+    '.Okkkkk',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 5,
+  mouthY: 8,
+  eye: '#2B1B0E',
+  line: '#4A2C1A',
+  errEye: '#FFFFFF',
+  keep: 'wp',
+}
+
+// 7) Tilki: uzun kulaklı, beyaz yanaklı, sivri çeneli
+const TILKI: Spec = {
+  title: 'Fox',
+  palette: { O: '#4A2A14', h: '#F2994A', m: '#E07B2A', k: '#B4561A', w: '#FFF6EA', d: '#3A2418' },
+  half: [
+    '.Od....',
+    '.Omd...',
+    '.OmmOOO',
+    '.Ohhhhh',
+    'Ohmmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Owmmmmm',
+    'Owwwwww',
+    '.Owwwww',
+    '..Owwkk',
+    '...OOOO',
+  ],
+  eyeX: 3,
+  eyeY: 5,
+  mouthY: 8,
+  eye: '#2A1608',
+  line: '#4A2A14',
+  errEye: '#FFFFFF',
+  keep: 'wd',
+}
+
+// 8) Kurbağa: tepede çıkıntılı gözler, açık renk karın
+const KURBAGA: Spec = {
+  title: 'Frog',
+  palette: { O: '#1E5A2A', h: '#8EDB74', m: '#4FAE4A', k: '#3A8A3A', w: '#E8F7C8' },
+  half: [
+    '..OOOO.',
+    '.OhhhhO',
+    'Ohmmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Okmmmmm',
+    'Owwwwww',
+    'Owwwwww',
+    '.Okkkkk',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 2,
+  mouthY: 5,
+  eye: '#10331A',
+  line: '#1E5A2A',
+  errEye: '#FFFFFF',
+  keep: 'w',
+}
+
+// 9) Penguen: koyu kafa, beyaz yüz ve karın, turuncu gaga
+const PENGUEN: Spec = {
+  title: 'Penguin',
+  palette: { O: '#14213D', m: '#2B3A5C', k: '#1B2845', w: '#F4F6FA', b: '#F5A524' },
+  half: [
+    '...OOOO',
+    '..Ommmm',
+    '.Ommmmm',
+    '.Ommmmm',
+    '.Owwwww',
+    '.Owwwww',
+    '.Owwwww',
+    '.Omwwbb',
+    '.Omwwbb',
+    'Ommwwww',
+    'Ommwwww',
+    '.bbbOOO',
+  ],
+  eyeX: 3,
+  eyeY: 4,
+  mouthY: 7,
+  eye: '#14213D',
+  line: '#8A4B0E',
+  keep: 'wb',
+}
+
+// 10) Baykuş: kulak tüyleri, krem yüz diskleri, gaga
+const BAYKUS: Spec = {
+  title: 'Owl',
+  palette: { O: '#3E2A1C', h: '#B07A4A', m: '#8C5A32', k: '#6B4224', w: '#F2E3C4', b: '#F2A93B' },
+  half: [
+    '.O.....',
+    '.OmO...',
+    '.OmmOOO',
+    '.Ohhhhh',
+    'Ohwwwww',
+    'Omwwwww',
+    'Omwwwww',
+    'Ommmmbb',
+    'Ommmmbb',
+    'Ommwmwm',
+    '.Okmwmw',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 4,
+  mouthY: 7,
+  eye: '#2A1A10',
+  line: '#7A4A12',
+  keep: 'wb',
+}
+
+// 11) Panda: yuvarlak kulaklar, koyu göz lekeleri
+const PANDA: Spec = {
+  title: 'Panda',
+  palette: { O: '#1A1A1A', h: '#FFFFFF', m: '#F2F2F2', k: '#CFCFCF', s: '#222222' },
+  half: [
+    '.OO....',
+    'OssO...',
+    'OssOOOO',
+    '.Ohhhhh',
+    'Ohssssm',
+    'Ohssssm',
+    'Ohssssm',
+    'Ohmmmmm',
+    'Ohmmmmm',
+    '.Okmmmm',
+    '.Ossmmm',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 4,
+  mouthY: 7,
+  eye: '#FFFFFF',
+  line: '#1A1A1A',
+  keep: 's',
+}
+
+// 12) Tavşan: uzun kulaklar, pembe burun
+const TAVSAN: Spec = {
+  title: 'Bunny',
+  palette: { O: '#6A4A5A', h: '#FFFFFF', m: '#F3E6EE', k: '#D9C3D2', p: '#F2A6C0', n: '#E87FA0' },
+  half: [
+    '.OO....',
+    '.OpO...',
+    '.OpO...',
+    '.OmmOOO',
+    'Ohhhhhh',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmn',
+    'Ommmmmm',
+    'Okmmmmm',
+    '.Okkkkk',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 5,
+  mouthY: 8,
+  eye: '#4A2A3A',
+  line: '#8A5A6E',
+  keep: 'pn',
+}
+
+// 13) Ejderha: boynuzlar, sırt çıkıntısı, krem burun
+const EJDERHA: Spec = {
+  title: 'Dragon',
+  palette: { O: '#143D2B', h: '#7FD08B', m: '#3FA85F', k: '#2A7A45', y: '#F2D16B', w: '#E8F5D0' },
+  half: [
+    '.y.....',
+    '.Oy...y',
+    '.OmOOOO',
+    '.Ohhhhh',
+    'Ohmmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Okmwwww',
+    'Ommwwww',
+    '.Okkkkk',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 5,
+  mouthY: 8,
+  eye: '#FFD54A',
+  line: '#143D2B',
+  errEye: '#FFFFFF',
+  keep: 'yw',
+}
+
+// 14) Balkabağı: sap, yan dilimler
+const BALKABAGI: Spec = {
+  title: 'Pumpkin',
+  palette: { O: '#5A2D0C', h: '#F59A3B', m: '#E67E22', k: '#B85C14', g: '#4C8C3A' },
+  half: [
+    '.....gg',
+    '....Ogg',
+    '.OOhhhh',
+    'Ohhmmmm',
+    'Ohmmmmm',
+    'Okmmmmm',
+    'Okmmmmm',
+    'Okmmmmm',
+    'Okmmmmm',
+    'Okkmmmm',
+    '.Okkmmm',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 4,
+  mouthY: 7,
+  eye: '#3A1A06',
+  line: '#3A1A06',
+  errEye: '#FFFFFF',
+  keep: 'g',
+}
+
+// 15) Uzaylı: iri baş, büyük koyu gözler, sivri çene
+const UZAYLI: Spec = {
+  title: 'Alien',
+  palette: { O: '#1F3D1F', h: '#9BE08F', m: '#6CC26A', k: '#4A9A4E', s: '#142014' },
+  half: [
+    '...OOOO',
+    '..Ohhhh',
+    '.Ohhmmm',
+    '.Ommmmm',
+    'Osssssm',
+    'Osssssm',
+    '.Osssmm',
+    '.Ommmmm',
+    '..Okmmm',
+    '..Okmmm',
+    '...Okkk',
+    '....OOO',
+  ],
+  eyeX: 3,
+  eyeY: 4,
+  mouthY: 7,
+  eye: '#B6FF9A',
+  line: '#1F3D1F',
+  keep: 's',
+}
+
+// 16) Jöle: alçak, yarı saydam görünümlü damla
+const JOLE: Spec = {
+  title: 'Slime',
+  palette: { O: '#1D5C6B', h: '#8EF0E0', m: '#3CCDB8', k: '#25A394' },
+  half: [
+    '.......',
+    '.......',
+    '....OOO',
+    '..OOhhh',
+    '.Ohhmmm',
+    '.Ommmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Okmmmmm',
+    'Okkkkkk',
+    '.OOOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 5,
+  mouthY: 8,
+  eye: '#0F3D44',
+  line: '#16707F',
+}
+
+// 17) Mantar: beyaz benekli kırmızı şapka, yüz gövdede
+const MANTAR: Spec = {
+  title: 'Mushroom',
+  palette: { O: '#4A1F1F', h: '#F25A5A', m: '#D63A3A', k: '#A12626', w: '#FFF8E8', f: '#F4E4C8', s: '#D8C2A0' },
+  half: [
+    '...OOOO',
+    '..Ohhhh',
+    '.Ohwwmm',
+    'Ohhmmmw',
+    'Ommmmmm',
+    'Okkkkkk',
+    '.Offfff',
+    '.Offfff',
+    '.Offfff',
+    '.Offfff',
+    '.Offsss',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 6,
+  mouthY: 9,
+  eye: '#3A2418',
+  line: '#8A5A3A',
+  keep: 'wfs',
+}
+
+// 18) Şövalye: çelik miğfer, koyu siperlik, kırmızı tüy
+const SOVALYE: Spec = {
+  title: 'Knight',
+  palette: { O: '#2B2F38', h: '#D5DAE3', m: '#A9B1BF', k: '#7C8596', s: '#1A1D24', r: '#E5484D' },
+  half: [
+    '.....rr',
+    '....Orr',
+    '..OOhhh',
+    '.Ohhmmm',
+    'Ohmmmmm',
+    'Omsssss',
+    'Omsssss',
+    'Omsssss',
+    'Ommmmmm',
+    'Okmmmmm',
+    '.Okkkkk',
+    '..OOOOO',
+  ],
+  eyeX: 3,
+  eyeY: 5,
+  mouthY: 8,
+  eye: '#FFD166',
+  line: '#2B2F38',
+  keep: 'rs',
+}
+
+// 19) Ahtapot: kubbe baş, dalgalı kollar
+const AHTAPOT: Spec = {
+  title: 'Octopus',
+  palette: { O: '#3E2A5A', h: '#C9A6F0', m: '#A06BE0', k: '#7B47B8' },
+  half: [
+    '...OOOO',
+    '..Ohhhh',
+    '.Ohhmmm',
+    'Ohmmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Ommmmmm',
+    'Okmmmmm',
+    'Okkkkkk',
+    'OO.OO.O',
+  ],
+  eyeX: 3,
+  eyeY: 4,
+  mouthY: 7,
+  eye: '#2B1A44',
+  line: '#4A2F78',
+  errEye: '#FFFFFF',
+}
+
+// 20) Kaktüs: dilimli fıçı kaktüs, tepede çiçek, saksı
+const KAKTUS: Spec = {
+  title: 'Cactus',
+  palette: { O: '#1F4D2B', h: '#7BC47F', m: '#4FA35A', k: '#35803F', p: '#F5A3C7', c: '#C46A3A', d: '#8E4A28' },
+  half: [
+    '.....pp',
+    '....Opp',
+    '..OOOmh',
+    '.Ohhmmk',
+    'Ohmmmmk',
+    'Ommmmmk',
+    'Ommmmmk',
+    'Ommmmmk',
+    'Ommmmmk',
+    'Okmmmmk',
+    '.Occccc',
+    '.Oddddd',
+  ],
+  eyeX: 3,
+  eyeY: 4,
+  mouthY: 7,
+  eye: '#10331A',
+  line: '#1F4D2B',
+  errEye: '#FFFFFF',
+  keep: 'pcd',
+}
+
 const CHARACTERS: Record<string, Spec> = {
   bit: BIT,
   ghost: GOLGE,
   astronaut: ASTRONOT,
   wizard: BUYUCU,
   cloud: BULUT,
+  cat: KEDI,
+  fox: TILKI,
+  frog: KURBAGA,
+  penguin: PENGUEN,
+  owl: BAYKUS,
+  panda: PANDA,
+  bunny: TAVSAN,
+  dragon: EJDERHA,
+  pumpkin: BALKABAGI,
+  alien: UZAYLI,
+  slime: JOLE,
+  mushroom: MANTAR,
+  knight: SOVALYE,
+  octopus: AHTAPOT,
+  cactus: KAKTUS,
 }
-const ORDER = ['bit', 'ghost', 'astronaut', 'wizard', 'cloud']
+const ORDER = [
+  'bit', 'ghost', 'astronaut', 'wizard', 'cloud',
+  'cat', 'fox', 'frog', 'penguin', 'owl',
+  'panda', 'bunny', 'dragon', 'pumpkin', 'alien',
+  'slime', 'mushroom', 'knight', 'octopus', 'cactus',
+]
 
 function pick(id: string): Spec {
   return CHARACTERS[id] ?? BIT
@@ -453,8 +954,75 @@ function poseFor(m: Mode, idleTicks: number, walk: number): Pose {
   return still
 }
 
+// ---BAĞ-START--- (şapkalar)
+// Şapka 2 piksel yüksekliğinde: baş boşluğu (2 piksel) tuvalin üstünden taşmasın.
+// Satırlar '.' saydam; rows[0] üst, rows[1] kafaya oturan satır.
+type Hat = { title: string; need: number; x: number; rows: string[] }
+
+const HAT_COLORS: Record<string, string> = {
+  r: '#D9534F',
+  R: '#9E2F2C',
+  b: '#4A78C8',
+  B: '#2F4F8F',
+  n: '#C9B26B',
+  N: '#8E7A3E',
+  y: '#F6C945',
+  k: '#34343E',
+  h: '#FFE066',
+}
+
+// need: açılması için gereken bağ puanı. x: şapkanın sol sütunu (sprite koordinatı; kafa
+// merkezi 6/7 arası olduğundan 6 genişlik x=4, 8 genişlik x=3)
+const HATS: Record<string, Hat> = {
+  beanie: { title: 'Beanie', need: 10, x: 4, rows: ['.rrrr.', 'RRRRRR'] },
+  cap: { title: 'Cap', need: 25, x: 4, rows: ['.bbbb.', 'bbbbBB'] },
+  bucket: { title: 'Bucket Hat', need: 50, x: 3, rows: ['..nnnn..', 'NNNNNNNN'] },
+  crown: { title: 'Crown', need: 100, x: 4, rows: ['y.yy.y', 'yyyyyy'] },
+  tophat: { title: 'Top Hat', need: 200, x: 3, rows: ['..kkkk..', 'kkrrrrkk'] },
+  halo: { title: 'Halo', need: 400, x: 4, rows: ['.hhhh.', '......'] },
+}
+const HAT_ORDER = ['beanie', 'cap', 'bucket', 'crown', 'tophat', 'halo']
+
+// Kendi şapkası/miğferi olan karakterler: ikinci şapka çakışır (Spec'te id yok, başlıkla eşlenir)
+const HAT_SKIP = new Set(['Code Wizard', 'Knight'])
+// Şapkanın oturacağı kafa tepesi sütunları; kulak/boynuz kenarlarda kaldığı için merkez bakılır
+const CROWN_FROM = 4
+const CROWN_TO = 10
+
+// Şapka pikselleri [x, y, renk] sprite koordinatında (dy eklenmeden). Şapka merkez
+// sütunlardaki ilk dolu satırın üstüne oturur (anten/sap varsa onun üstüne); üst kenar
+// tuvalin dışına çıkacaksa aşağı kayar ve yalnız boş piksele çizilir (sprite öndedir).
+function hatPixels(spec: Spec, hatId: string, dy: number): Array<[number, number, string]> {
+  const hat = HATS[hatId]
+  if (!hat || HAT_SKIP.has(spec.title)) return []
+
+  let crown = spec.half.length
+  for (let r = 0; r < spec.half.length && crown === spec.half.length; r += 1) {
+    const full = mirror(spec.half[r] ?? '')
+    for (let c = CROWN_FROM; c < CROWN_TO; c += 1) {
+      if (full.charAt(c) !== '.') {
+        crown = r
+        break
+      }
+    }
+  }
+
+  const top = Math.max(-dy, crown - hat.rows.length)
+  const out: Array<[number, number, string]> = []
+  hat.rows.forEach((row, r) => {
+    for (let c = 0; c < row.length; c += 1) {
+      const color = HAT_COLORS[row.charAt(c)]
+      if (color) out.push([hat.x + c, top + r, color])
+    }
+  })
+
+  return out
+}
+// ---BAĞ-END---
+
 // tired: bağlam dolmak üzere; yarı kapalı gözler ve ter damlası
-type ComposeOpts = { cw: number; idleTicks: number; tool: string; tired: boolean }
+// hat: seçili şapka id'si (yok = şapkasız)
+type ComposeOpts = { cw: number; idleTicks: number; tool: string; tired: boolean; long?: boolean; hat?: string }
 
 // Z harfi: uyku parçacığı (3x3)
 const Z_PIXELS: ReadonlyArray<readonly [number, number]> = [
@@ -467,10 +1035,270 @@ const Z_PIXELS: ReadonlyArray<readonly [number, number]> = [
   [2, 2],
 ]
 
+// ---HAREKET-START---
+// Karaktere özgü boşta hareketi. CYCLE içinde t = 86..97'de (poseFor'un yürüyüş/esneme/bakınma/
+// zıplama pencerelerinden sonra, uyku anı 62'den uzak) 6 kare x 2 tik oynar; yürüme, esneme ve
+// uykuyla çakışmaz. Yalnız sprite'ı yukarı kaydırır (lift), bakış yönünü değiştirir (look) ve
+// boş piksellere parçacık düşer (dots); half dizileri ve yüz pikselleri değişmez.
+const HAREKET_BASLA = 86
+const HAREKET_TIK = 2
+const HAREKET_KARE = 6
+
+type HareketNokta = readonly [number, number, string]
+// Renk: tek harf = karakterin (temalı) palet harfi, aksi halde hex
+type Hareket = {
+  lift?: readonly number[]
+  look?: readonly (-1 | 0 | 1)[]
+  dots?: readonly (readonly HareketNokta[])[]
+}
+
+const HK_GRI = '#9AA3AD'
+const HK_ACIK = '#C9D1D9'
+const HK_YAGMUR = '#6CB4EE'
+const HK_BALON = '#9FD8F5'
+const HK_YESIL = '#7CFF9B'
+const HK_PEMBE = '#F28BB0'
+const HK_BAMBU = '#5DB04A'
+const HK_SPOR = '#E8DCC0'
+
+// Dikey çizgi: x sütununda y0..y1
+const hkCol = (x: number, y0: number, y1: number, c: string): HareketNokta[] =>
+  Array.from({ length: Math.max(0, y1 - y0 + 1) }, (_, i) => [x, y0 + i, c] as const)
+// Artı (parıltı): merkez c, kollar a
+const hkPlus = (x: number, y: number, c: string, a: string): HareketNokta[] => [
+  [x, y, c],
+  [x - 1, y, a],
+  [x + 1, y, a],
+  [x, y - 1, a],
+  [x, y + 1, a],
+]
+
+const HAREKET_VARSAYILAN: Hareket = {
+  dots: [[], [[16, 4, WHITE]], hkPlus(16, 4, WHITE, WHITE), hkPlus(16, 4, WHITE, WHITE), [[16, 4, WHITE]], []],
+}
+
+const QUIRKS: Record<string, Hareket> = {
+  // Anten yanıp söner
+  bit: {
+    dots: [
+      [],
+      [[7, 1, AMBER], [8, 1, AMBER]],
+      [[7, 0, AMBER], [8, 0, AMBER]],
+      [[6, 0, WHITE], [9, 0, WHITE]],
+      [[5, 1, WHITE], [10, 1, WHITE]],
+      [],
+    ],
+  },
+  // Süzülür
+  ghost: { lift: [0, 1, 2, 2, 1, 0] },
+  // Süzülür, yıldız parıldar
+  astronaut: {
+    lift: [0, 1, 1, 2, 1, 0],
+    dots: [[], [[16, 3, WHITE]], [[16, 3, WHITE], [17, 6, WHITE]], [[17, 6, WHITE]], [[15, 9, WHITE]], []],
+  },
+  // Şapka ucunda sihir kıvılcımı
+  wizard: {
+    dots: [
+      [],
+      [[10, 2, AMBER]],
+      [[10, 2, AMBER], [4, 3, WHITE]],
+      [[4, 3, WHITE], [11, 1, AMBER]],
+      [[11, 1, AMBER], [5, 1, WHITE]],
+      [],
+    ],
+  },
+  // Yanlardan yağmur damlası
+  cloud: {
+    dots: [
+      [[0, 6, HK_YAGMUR]],
+      [[0, 8, HK_YAGMUR], [15, 5, HK_YAGMUR]],
+      [[0, 10, HK_YAGMUR], [15, 7, HK_YAGMUR]],
+      [[0, 12, HK_YAGMUR], [15, 9, HK_YAGMUR]],
+      [[15, 11, HK_YAGMUR]],
+      [[15, 13, HK_YAGMUR]],
+    ],
+  },
+  // Kuyruk sallar
+  cat: {
+    dots: [
+      [[15, 11, 'k'], [16, 11, 'k'], [17, 11, 'k']],
+      [[15, 11, 'k'], [16, 10, 'k'], [16, 9, 'k']],
+      [[15, 11, 'k'], [16, 11, 'k'], [17, 11, 'k']],
+      [[15, 11, 'k'], [16, 12, 'k'], [17, 12, 'k']],
+      [[15, 11, 'k'], [16, 11, 'k'], [17, 11, 'k']],
+      [[15, 11, 'k'], [16, 10, 'k'], [16, 9, 'k']],
+    ],
+  },
+  // Kabarık kuyruk, beyaz uçlu
+  fox: {
+    dots: [
+      [[15, 10, 'k'], [16, 10, 'k'], [17, 10, 'w']],
+      [[15, 10, 'k'], [16, 9, 'k'], [17, 8, 'w']],
+      [[15, 10, 'k'], [16, 10, 'k'], [17, 10, 'w']],
+      [[15, 10, 'k'], [16, 11, 'k'], [17, 12, 'w']],
+      [[15, 10, 'k'], [16, 10, 'k'], [17, 10, 'w']],
+      [[15, 10, 'k'], [16, 9, 'k'], [17, 8, 'w']],
+    ],
+  },
+  // Zıplar, sinek uçar
+  frog: {
+    lift: [0, 1, 2, 2, 1, 0],
+    dots: [[], [[16, 6, WHITE]], [[17, 4, WHITE]], [[16, 3, WHITE]], [[17, 5, WHITE]], []],
+  },
+  // Kanat çırpar
+  penguin: {
+    lift: [0, 1, 0, 1, 0, 0],
+    dots: [
+      [],
+      [[1, 9, 'w'], [14, 9, 'w']],
+      [[1, 8, 'w'], [0, 7, 'w'], [14, 8, 'w'], [15, 7, 'w']],
+      [[1, 9, 'w'], [14, 9, 'w']],
+      [[1, 8, 'w'], [0, 7, 'w'], [14, 8, 'w'], [15, 7, 'w']],
+      [],
+    ],
+  },
+  // Başını çevirir (bakış kayar)
+  owl: { look: [-1, -1, 1, 1, -1, 0] },
+  // Bambu çiğner
+  panda: {
+    lift: [0, 1, 0, 1, 0, 1],
+    dots: [
+      [],
+      hkCol(15, 4, 12, HK_BAMBU),
+      hkCol(15, 6, 12, HK_BAMBU),
+      hkCol(15, 8, 12, HK_BAMBU),
+      hkCol(15, 10, 12, HK_BAMBU),
+      [],
+    ],
+  },
+  // Çift zıplama
+  bunny: { lift: [0, 2, 0, 2, 0, 0] },
+  // Burundan küçük duman
+  dragon: {
+    dots: [
+      [],
+      [[15, 8, HK_GRI]],
+      [[15, 7, HK_GRI], [16, 6, HK_ACIK]],
+      [[16, 5, HK_GRI], [17, 4, HK_ACIK]],
+      [[17, 3, HK_ACIK]],
+      [],
+    ],
+  },
+  // Yüzünün yanında parıltı
+  pumpkin: {
+    dots: [[], [[16, 6, WHITE]], hkPlus(16, 6, WHITE, AMBER), hkPlus(16, 6, WHITE, AMBER), [[16, 6, AMBER]], []],
+  },
+  // Anten sinyali
+  alien: {
+    lift: [0, 1, 1, 0, 0, 0],
+    dots: [
+      [],
+      [[7, 1, HK_YESIL], [8, 1, HK_YESIL]],
+      [[6, 0, HK_YESIL], [9, 0, HK_YESIL]],
+      [[5, 1, HK_YESIL], [10, 1, HK_YESIL]],
+      [],
+      [],
+    ],
+  },
+  // Sıçrar, inince sıçrama damlası
+  slime: {
+    lift: [0, 1, 2, 2, 1, 0],
+    dots: [[], [], [], [], [[0, 13, 'h'], [15, 13, 'h']], [[0, 13, 'h'], [15, 13, 'h']]],
+  },
+  // Başından spor saçar
+  mushroom: {
+    dots: [
+      [],
+      [[5, 1, HK_SPOR]],
+      [[5, 0, HK_SPOR], [9, 1, HK_SPOR]],
+      [[9, 0, HK_SPOR], [6, 1, HK_SPOR]],
+      [[11, 0, HK_SPOR], [4, 0, HK_SPOR]],
+      [],
+    ],
+  },
+  // Kılıcını kaldırır
+  knight: {
+    dots: [
+      [],
+      hkCol(15, 10, 11, HK_ACIK),
+      hkCol(15, 8, 11, HK_ACIK),
+      [...hkCol(15, 6, 11, HK_ACIK), [15, 5, WHITE]],
+      hkCol(15, 9, 11, HK_ACIK),
+      [],
+    ],
+  },
+  // Kabarcık çıkarır
+  octopus: {
+    lift: [0, 1, 0, 1, 0, 0],
+    dots: [
+      [],
+      [[15, 10, HK_BALON]],
+      [[15, 9, HK_BALON], [16, 7, HK_BALON]],
+      [[16, 6, HK_BALON], [15, 5, HK_BALON]],
+      [[15, 4, HK_BALON]],
+      [],
+    ],
+  },
+  // Tepesinde çiçek açar
+  cactus: {
+    dots: [
+      [],
+      [[7, 1, HK_PEMBE], [8, 1, HK_PEMBE]],
+      [[7, 1, HK_PEMBE], [8, 1, HK_PEMBE], [7, 0, HK_PEMBE], [8, 0, AMBER]],
+      [[7, 1, HK_PEMBE], [8, 1, HK_PEMBE], [7, 0, HK_PEMBE], [8, 0, AMBER]],
+      [[7, 1, HK_PEMBE], [8, 1, HK_PEMBE]],
+      [],
+    ],
+  },
+}
+
+// Pencere dışında -1; yalnız boşta, uyumuyorken
+function hareketKare(m: Mode, idleTicks: number): number {
+  if (m !== 'idle' || idleTicks >= SLEEP_AFTER) return -1
+
+  const t = idleTicks % CYCLE
+  if (t < HAREKET_BASLA || t >= HAREKET_BASLA + HAREKET_TIK * HAREKET_KARE) return -1
+
+  return Math.floor((t - HAREKET_BASLA) / HAREKET_TIK)
+}
+
+// compose yalnız Spec alır (tema palet verir); karakteri başlığından bulur
+function hareketOf(spec: Spec): Hareket {
+  const id = Object.keys(CHARACTERS).find(key => CHARACTERS[key]?.title === spec.title)
+
+  return (id !== undefined ? QUIRKS[id] : undefined) ?? HAREKET_VARSAYILAN
+}
+
+// Bakış yönünü pencerede değiştirir; poseFor'un kendi look alanlarıyla çakışmaz
+function hareketPose(pose: Pose, spec: Spec, m: Mode, idleTicks: number): Pose {
+  const k = hareketKare(m, idleTicks)
+  const look = k < 0 ? undefined : hareketOf(spec).look?.[k]
+
+  return look === undefined ? pose : { ...pose, look }
+}
+
+function hareketLift(spec: Spec, m: Mode, idleTicks: number): number {
+  const k = hareketKare(m, idleTicks)
+
+  return k < 0 ? 0 : (hareketOf(spec).lift?.[k] ?? 0)
+}
+
+// spark yalnız boş piksele yazar; sprite her zaman öndedir
+function hareketCiz(spec: Spec, m: Mode, idleTicks: number, spark: (x: number, y: number, c: string) => void): void {
+  const k = hareketKare(m, idleTicks)
+  if (k < 0) return
+
+  for (const [x, y, c] of hareketOf(spec).dots?.[k] ?? []) {
+    const color = c.length === 1 ? spec.palette[c] : c
+    if (color) spark(x, y, color)
+  }
+}
+// ---HAREKET-END---
+
 function compose(spec: Spec, m: Mode, f: number, o: ComposeOpts): Px[][] {
   const { cw } = o
   const canvas: Px[][] = Array.from({ length: H }, () => Array<Px>(cw).fill(undefined))
-  const pose = poseFor(m, o.idleTicks, Math.max(0, cw - W_NARROW))
+  const pose = hareketPose(poseFor(m, o.idleTicks, Math.max(0, cw - W_NARROW)), spec, m, o.idleTicks) // HAREKET
 
   // Hareket: boşta nefes (1 px), yürürken adım sekmesi, uykuda yavaş nefes, çalışırken
   // hızlı sekme, bitince zıplama, hatada titreme
@@ -485,6 +1313,7 @@ function compose(spec: Spec, m: Mode, f: number, o: ComposeOpts): Px[][] {
   } else if (m === 'ok') {
     dy = 1 - (f % 2)
   }
+  dy = Math.max(0, dy - hareketLift(spec, m, o.idleTicks)) // HAREKET
   const dx = m === 'err' ? (f % 2 === 0 ? 0 : 2) : 1 + pose.wx
 
   const put = (x: number, y: number, c: Px) => {
@@ -541,13 +1370,13 @@ function compose(spec: Spec, m: Mode, f: number, o: ComposeOpts): Px[][] {
     } else if (spec.narrow) {
       // Dar yüz: 2x2 kırmızı blok
       for (const [gx, gy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
-        px(ex + gx, ey + gy, RED)
+        px(ex + gx, ey + gy, spec.errEye ?? RED)
       }
     } else {
       // Hata: X göz 3 piksel geniş; iki X birbirine değmesin diye dışa doğru açılır
       const x0 = isRight ? ex : ex - 1
       for (const [gx, gy] of [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]] as const) {
-        px(x0 + gx, ey + gy, RED)
+        px(x0 + gx, ey + gy, spec.errEye ?? RED)
       }
     }
   }
@@ -576,6 +1405,14 @@ function compose(spec: Spec, m: Mode, f: number, o: ComposeOpts): Px[][] {
     px(8, my + 1, RED)
   }
 
+  // ---BAĞ-START--- (şapka kancası)
+  if (o.hat) {
+    for (const [hx, hy, hc] of hatPixels(spec, o.hat, dy)) {
+      if (canvas[dy + hy]?.[dx + hx] === undefined) px(hx, hy, hc)
+    }
+  }
+  // ---BAĞ-END---
+
   // Parçacıklar yalnız boş piksele düşer; sprite her zaman öndedir
   // Dar tuvalde sağ kenara sığacak şekilde geri çekilir; sprite'ın boş pikselleri kalır
   const sideX = Math.min(15, cw - 3)
@@ -593,11 +1430,19 @@ function compose(spec: Spec, m: Mode, f: number, o: ComposeOpts): Px[][] {
     spark(0, 3 + (f % 3), AMBER)
     spark(15, 5 - (f % 3), AMBER)
     spark(f % 2 === 0 ? 3 : 12, 0, WHITE)
+    // İSTATİSTİK: uzun işten sonra ekstra yıldızlar (üst iki satır baş boşluğudur)
+    if (o.long) {
+      spark(15, f % 2, WHITE)
+      spark(0, 1 + (f % 2), WHITE)
+      spark(f % 2 === 0 ? 8 : 5, 1, AMBER)
+    }
   } else if (m === 'err') {
     spark(15, 3 + (f % 4), SWEAT)
   }
 
   if (o.tired && (m === 'idle' || m === 'work')) spark(sideX, 3 + (f % 4), SWEAT)
+
+  hareketCiz(spec, m, o.idleTicks, spark) // HAREKET
 
   // Aksesuar: yalnız geniş tuvalde, çalışırken ve araç tanınıyorsa; zemine oturur
   const kind = m === 'work' && cw >= W_WIDE ? propFor(o.tool) : undefined
@@ -675,13 +1520,126 @@ const MINIS: Record<string, Mini> = {
     half: ['..OO', '.Ohh', 'Ohhm', 'Ommm', 'Ommm', 'Ommm', 'Okmm', '.OOO'],
     eyeY: 4,
   },
+  cat: { half: ['.O..', 'OpOO', 'Ommm', 'Ommm', 'Owww', 'Owww', 'Okkk', '.OOO'], eyeY: 3 },
+  fox: { half: ['O...', 'OmO.', 'OmmO', 'Ommm', 'Owww', 'Owww', '.Okw', '..OO'], eyeY: 3 },
+  frog: { half: ['.OO.', 'Ohhm', 'Ommm', 'Ommm', 'Owww', 'Owww', 'Okkk', '.OOO'], eyeY: 2 },
+  penguin: { half: ['.OOO', 'Ommm', 'Owww', 'Owbb', 'Omww', 'Omww', 'Omww', '.bOO'], eyeY: 2 },
+  owl: { half: ['O...', 'OmOO', 'Owww', 'Owbb', 'Ommm', 'Omwm', 'Okwk', '.OOO'], eyeY: 2 },
+  panda: { half: ['OO..', 'OsO.', 'Ommm', 'Omsm', 'Ommm', 'Ommm', 'Okmk', '.OOO'], eyeY: 3 },
+  bunny: { half: ['.O..', 'OpO.', 'OpO.', 'Ohhh', 'Ommm', 'Ommm', 'Okmm', '.OOO'], eyeY: 4 },
+  dragon: { half: ['y...', 'OyO.', 'OmmO', 'Ommm', 'Ommw', 'Owww', 'Okkk', '.OOO'], eyeY: 3 },
+  pumpkin: { half: ['...g', '..Og', '.Ohh', 'Ohmm', 'Ommm', 'Ommm', 'Okkm', '.OOO'], eyeY: 4 },
+  alien: { half: ['.OOO', 'Ohhh', 'Ommm', 'Ossm', '.Omm', '.Okk', '..Ok', '..OO'], eyeY: 3 },
+  slime: { half: ['....', '....', '..OO', '.Ohh', 'Ohmm', 'Ommm', 'Okkk', 'OOOO'], eyeY: 4 },
+  mushroom: { half: ['..OO', '.Ohw', 'Ohmm', 'Okkk', '.Off', '.Off', '.Oss', '..OO'], eyeY: 4 },
+  knight: { half: ['...r', '..Or', '.Ohh', 'Ohmm', 'Omss', 'Ommm', 'Okkk', '.OOO'], eyeY: 4 },
+  octopus: { half: ['.OOO', 'Ohhh', 'Ommm', 'Ommm', 'Ommm', 'Okkk', 'Okkk', 'O.O.'], eyeY: 3 },
+  cactus: { half: ['...p', '..Op', '.Ohh', 'Ohmm', 'Ommm', 'Ommk', 'Occc', '.Odd'], eyeY: 3 },
 }
+
+// ---ROL-START---
+// Alt ajan türü -> sabit karakter. Anahtar: türün son parçası (agent-sdk-dev:x -> x), küçük harf.
+// Aynı tür her oturumda aynı yüzü taşısın diye ilk görülme sırasına bağlı değil.
+const ROLE_CHARS: Record<string, string> = {
+  explore: 'owl',
+  plan: 'wizard',
+  'general-purpose': 'panda',
+  'claude-code-guide': 'astronaut',
+  'statusline-setup': 'bit',
+  'web-dev-expert': 'cat',
+  'db-architect': 'cloud',
+  'devops-engineer': 'knight',
+  'ui-reviewer': 'mushroom',
+  'react-native-expert': 'alien',
+  'langchain-ts-expert': 'octopus',
+  'ml-engineer': 'slime',
+  'obsidian-vault-manager': 'bunny',
+  'agent-sdk-verifier-py': 'frog',
+  'agent-sdk-verifier-ts': 'frog',
+}
+
+function roleKey(type: string): string {
+  return (type.split(':').pop() ?? type).toLowerCase()
+}
+
+// Bilinmeyen türler yalnız sabit rollerin kullanmadığı karakterlerden sırayla alır
+const ROLE_FIXED = new Set(Object.values(ROLE_CHARS))
+const SPARE_CHARS = ORDER.filter((c) => !ROLE_FIXED.has(c))
+
+// Rol aksesuarı: mini sprite'a göre (sol üst = sprite 0,0) piksel parçaları. Negatif x/y
+// sprite'ın dışındaki 1 piksellik kenar şeridi. Sprite önde çizilir; aksesuar yalnız boş
+// piksele düşer, bu yüzden gözleri (sütun 2/5) ve ağzı (3-4) asla kapatmaz. Her aksesuar
+// ait olduğu karakterin boş köşelerine göre ayarlıdır.
+type AccPart = { x: number; y: number; rows: string[] }
+type Accessory = { palette: Record<string, string>; parts: AccPart[] }
+
+const ACCESSORIES: Record<string, Accessory> = {
+  // Dürbün: baykuşun kulak tüyleri arasındaki boş üst satır
+  explore: {
+    palette: { B: '#C9A227', L: '#7FE3FF' },
+    parts: [{ x: 1, y: 0, rows: ['BLBBLB'] }],
+  },
+  // Klasör: sihirbazın cübbesinin daraldığı sol alt boşluk
+  plan: {
+    palette: { T: '#B07D1E', Y: '#E8B84A' },
+    parts: [{ x: -1, y: 3, rows: ['T.', 'YY', 'YY', 'YY'] }],
+  },
+  // Sırt çantası: gövdenin iki yanında taşan çanta
+  'general-purpose': {
+    palette: { H: '#E3A24E', P: '#B8651B', D: '#7A3F10' },
+    parts: [
+      { x: -1, y: 2, rows: ['H', 'P', 'P', 'P', 'D'] },
+      { x: 8, y: 2, rows: ['H', 'P', 'P', 'P', 'D'] },
+    ],
+  },
+  // İngiliz anahtarı: şövalyenin sağ üstündeki boşluk, sap sağ kenarda
+  'devops-engineer': {
+    palette: { S: '#B5C0CC', D: '#6C7A89' },
+    parts: [{ x: 6, y: 0, rows: ['S.S', 'SDS', '..S', '..S', '..S'] }],
+  },
+  // Veritabanı silindiri: bulutun sağ üst köşesi
+  'db-architect': {
+    palette: { L: '#9FD3FF', B: '#4D8FD6', D: '#2F5F9E' },
+    parts: [{ x: 7, y: -1, rows: ['LL', 'BB', 'DD'] }],
+  },
+  // Telefon: uzaylının sağ yanındaki boş sütunlar
+  'react-native-expert': {
+    palette: { D: '#3A4252', S: '#7FE3FF' },
+    parts: [{ x: 7, y: 4, rows: ['DD', 'SS', 'SS', 'DD'] }],
+  },
+  // Renk paleti: mantarın sap kenarı
+  'ui-reviewer': {
+    palette: { T: '#D9B77E', R: '#E5484D', G: '#4CAF50', B: '#4D8FD6' },
+    parts: [{ x: -1, y: 4, rows: ['TR', 'GT', 'TB'] }],
+  },
+  // Deney şişesi: balçığın boş üst yarısı
+  'ml-engineer': {
+    palette: { G: '#CFE8F5', L: '#5BD58A' },
+    parts: [{ x: 6, y: -1, rows: ['.G.', '.G.', 'LLL', 'LLL'] }],
+  },
+  // Obsidyen taşı: tavşanın kulakları arasındaki vadi
+  'obsidian-vault-manager': {
+    palette: { L: '#D8C8FF', P: '#9B7BF0', D: '#6A4BC4' },
+    parts: [
+      { x: 2, y: 0, rows: ['LPPD'] },
+      { x: 3, y: 1, rows: ['PD'] },
+    ],
+  },
+}
+// ---ROL-END---
 
 const MW = 10
 const MH = 10
 
 // slide: giriş/çıkış kayması (miniSlide); kayarken adım sekmesi yapar
-function composeMini(id: string, m: Mode, f: number, slide: number, themeId: string): Px[][] {
+function composeMini(
+  id: string,
+  m: Mode,
+  f: number,
+  slide: number,
+  themeId: string,
+  type?: string,
+): Px[][] {
   const spec = themed(pick(id), themeId)
   const mini = MINIS[id] ?? MINI_BIT
   const canvas: Px[][] = Array.from({ length: MH }, () => Array<Px>(MW).fill(undefined))
@@ -725,6 +1683,23 @@ function composeMini(id: string, m: Mode, f: number, slide: number, themeId: str
   } else if (m === 'err') {
     spark(9, 2 + (f % 4), SWEAT)
   }
+
+  // ---ROL-START---
+  // Aksesuar en son ve yalnız boş piksele çizilir: sprite ve parçacıklar önde kalır
+  const acc = type ? ACCESSORIES[roleKey(type)] : undefined
+  if (acc) {
+    for (const part of acc.parts) {
+      part.rows.forEach((row, r) => {
+        for (let c = 0; c < row.length; c += 1) {
+          const color = acc.palette[row.charAt(c)]
+          const tx = dx + part.x + c
+          const ty = dy + part.y + r
+          if (color && canvas[ty]?.[tx] === undefined) put(tx, ty, color)
+        }
+      })
+    }
+  }
+  // ---ROL-END---
 
   return canvas
 }
@@ -787,6 +1762,103 @@ const CHROME_ROWS = 2
 // Alt ajan satırı sayısının varsayılan üst sınırı (maxRows yoksa)
 const MAX_MINI_LINES = 3
 
+// ---İSTATİSTİK-START---
+// Tur süresi / araç sayacı, uzun iş kutlaması ve /pixel-agent stats. Sayaçlar oturum
+// ömürlüdür (kalıcı değil); session.start'ta sıfırlanır.
+type StatTurn = { startMs: number; startFrame: number; tools: number }
+type StatTotals = { turns: number; tools: number; errors: number; workMs: number; byTool: Record<string, number> }
+
+const STAT_NO_TURN: StatTurn = { startMs: -1, startFrame: -1, tools: 0 }
+const STAT_EMPTY: StatTotals = { turns: 0, tools: 0, errors: 0, workMs: 0, byTool: {} }
+
+// Çalışan turun başlangıcı (startFrame -1: tur yok). Süre render'da Date.now ile değil,
+// 450 ms'lik frame sayacı farkından hesaplanır (saf render)
+const statTurn = atom({ plugin: 'pixel-agent', key: 'statTurn' } as const, STAT_NO_TURN)
+// Uzun biten turun süresi (sn); -1: son tur uzun değildi / tur sürüyor
+const statDone = atom({ plugin: 'pixel-agent', key: 'statDone' } as const, -1)
+const statTotals = atom({ plugin: 'pixel-agent', key: 'statTotals' } as const, STAT_EMPTY)
+
+// Bu süre (sn) ve üstü süren tur "uzun iş" sayılır: ok modu daha uzun kalır, ekstra yıldız çıkar
+const LONG_TURN_SEC = 120
+const OK_HOLD_MS = 4000
+const OK_HOLD_LONG_MS = 8000
+const STAT_TOP_TOOLS = 3
+
+// Olay kancasındaki $ (durum + saat); hook bağlamı bu şekle yapısal olarak uyar
+type StatDollar = Parameters<typeof read>[0] & { clock: { now: () => Promise<number> } }
+
+function fmtClock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+async function statTurnBegin($: StatDollar): Promise<void> {
+  const now = await $.clock.now()
+  const f = await read($, frame)
+  await update($, statTurn, () => ({ startMs: now, startFrame: f, tools: 0 }))
+  await update($, statDone, () => -1)
+}
+
+async function statToolCall($: StatDollar, tool: string): Promise<void> {
+  // MCP araçları "mcp__sunucu__ad" gelir; listede yalnız son parça okunur
+  const name = tool.split('__').pop() || tool
+  await update($, statTurn, t => ({ ...t, tools: t.tools + 1 }))
+  await update($, statTotals, t => ({ ...t, tools: t.tools + 1, byTool: { ...t.byTool, [name]: (t.byTool[name] ?? 0) + 1 } }))
+}
+
+async function statToolError($: StatDollar): Promise<void> {
+  await update($, statTotals, t => ({ ...t, errors: t.errors + 1 }))
+}
+
+// Turu kapatır; ok modunun kaç ms kalacağını döndürür (uzun turda daha uzun)
+async function statTurnEnd($: StatDollar): Promise<number> {
+  const now = await $.clock.now()
+  const turn = await read($, statTurn)
+  // prompt.submit görülmediyse (mod turun ortasında yüklendi) süre bilinmez, 0 sayılır
+  const ms = turn.startMs < 0 ? 0 : Math.max(0, now - turn.startMs)
+  const long = ms >= LONG_TURN_SEC * 1000
+
+  await update($, statTotals, t => ({ ...t, turns: t.turns + 1, workMs: t.workMs + ms }))
+  await update($, statTurn, () => STAT_NO_TURN)
+  await update($, statDone, () => (long ? Math.floor(ms / 1000) : -1))
+
+  return long ? OK_HOLD_LONG_MS : OK_HOLD_MS
+}
+
+async function statReset($: StatDollar): Promise<void> {
+  await update($, statTurn, () => STAT_NO_TURN)
+  await update($, statDone, () => -1)
+  await update($, statTotals, () => STAT_EMPTY)
+}
+
+async function statsText($: StatDollar): Promise<string> {
+  const t = await read($, statTotals)
+  const top = Object.entries(t.byTool)
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .slice(0, STAT_TOP_TOOLS)
+    .map(([name, n]) => `${name} ${n}`)
+    .join(', ')
+
+  return `Session: ${plural(t.turns, 'turn')}, ${plural(t.tools, 'tool call')}, ${plural(t.errors, 'error')}, ${fmtClock(t.workMs / 1000)} working.\nTop tools: ${top || 'none yet'}.`
+}
+
+// Başlıktaki durum metni: çalışırken "working · Bash · mm:ss · N tools", uzun turdan sonra "done in mm:ss"
+function statLine(base: string, m: Mode, f: number, turn: StatTurn, doneSec: number): string {
+  if (m === 'ok' && doneSec >= 0) return `done in ${fmtClock(doneSec)}`
+
+  if ((m === 'work' || m === 'err') && turn.startFrame >= 0) {
+    const ticks = (f - turn.startFrame + FRAME_WRAP) % FRAME_WRAP
+
+    return `${base} · ${fmtClock((ticks * TICK_MS) / 1000)} · ${plural(turn.tools, 'tool')}`
+  }
+
+  return base
+}
+// ---İSTATİSTİK-END---
+
 // Mevcut karakter dışından rastgele biri; tek karakter varsa aynısı döner
 function randomOther(current: string): string {
   const pool = ORDER.filter(id => id !== current)
@@ -794,13 +1866,179 @@ function randomOther(current: string): string {
   return pool[Math.floor(Math.random() * pool.length)] ?? current
 }
 
+// ---BAĞ-START--- (puan, kilit ve komut mantığı)
+// Hook içinden gelen $ bu alanların üst kümesidir; yalnız kullanılanlar tanımlanır
+type BondCtx = Parameters<typeof read>[0] & {
+  store: { get: (key: string) => Promise<unknown>; set: (key: string, value: unknown) => Promise<void> }
+  ui: { toast: (text: string) => void }
+  clock: { now: () => Promise<number>; after: (ms: number, fn: () => void) => unknown }
+}
+
+const BOND_DAY_MS = 86400000
+// Bu kadar gün açılmazsa dönüşte kısa karşılama gösterilir
+const BOND_AWAY_DAYS = 3
+const BOND_WELCOME_MS = 12000
+
+// Diskten gelen veri güvenilmez: bilinmeyen karakter/şapka ve geçersiz sayılar atılır
+function cleanPoints(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (raw && typeof raw === 'object') {
+    for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (ORDER.includes(id) && typeof v === 'number' && Number.isFinite(v) && v > 0) out[id] = Math.floor(v)
+    }
+  }
+
+  return out
+}
+
+function cleanHats(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (raw && typeof raw === 'object') {
+    for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (ORDER.includes(id) && typeof v === 'string' && HATS[v]) out[id] = v
+    }
+  }
+
+  return out
+}
+
+// Seçili şapka yalnız açıksa görünür (puan değeri elle bozulsa bile kilitli şapka çıkmaz)
+function activeHat(hats: Record<string, string>, points: number, id: string): string | undefined {
+  const h = hats[id]
+  const need = h ? HATS[h]?.need : undefined
+
+  return h && need !== undefined && points >= need ? h : undefined
+}
+
+function nextUnlock(points: number): { id: string; need: number } | undefined {
+  for (const id of HAT_ORDER) {
+    const need = HATS[id]?.need ?? 0
+    if (points < need) return { id, need }
+  }
+
+  return undefined
+}
+
+// Oturum açılışında puan/şapkaları geri yükler; uzun aradan dönüşte kısa karşılama kurar.
+// Yalnız son görülme zamanı saklanır, ayrıca özlem sayacı tutulmaz.
+async function bondRestore($: BondCtx): Promise<void> {
+  const points = cleanPoints(await $.store.get('bondPoints'))
+  const hats = cleanHats(await $.store.get('bondHats'))
+  await update($, bondPoints, () => points)
+  await update($, bondHats, () => hats)
+
+  const now = await $.clock.now()
+  const lastSeen = await $.store.get('bondLastSeen')
+  await $.store.set('bondLastSeen', now)
+
+  if (typeof lastSeen !== 'number' || now - lastSeen < BOND_AWAY_DAYS * BOND_DAY_MS) return
+
+  const id = await read($, character)
+  if ((points[id] ?? 0) <= 0) return
+
+  const days = Math.floor((now - lastSeen) / BOND_DAY_MS)
+  await update($, bondWelcome, () => `welcome back, ${days} days`)
+  $.clock.after(BOND_WELCOME_MS, () => {
+    void update($, bondWelcome, () => '').catch(() => undefined)
+  })
+}
+
+// Ana döngüde başarıyla biten turda aktif karakterin bağını 1 artırır; alt ajan turu,
+// iptal ve hata sayılmaz. Yeni şapka açılırsa kısa bildirim gösterir.
+async function bondTurnDone($: BondCtx): Promise<void> {
+  const id = await read($, character)
+  const points = await update($, bondPoints, p => ({ ...p, [id]: (p[id] ?? 0) + 1 }))
+  await $.store.set('bondPoints', points)
+  await $.store.set('bondLastSeen', await $.clock.now())
+
+  const n = points[id] ?? 0
+  const got = HAT_ORDER.find(h => HATS[h]?.need === n)
+  if (got) {
+    $.ui.toast(`${pick(id).title} bond ${n}: new hat unlocked, ${HATS[got]?.title ?? got}. Try /pixel-agent hat`)
+  }
+}
+
+// Şapka seçimi ('none' = şapkasız); komut ve Select ortak kullanır. ok: false ise seçim değişmedi
+async function bondChooseHat($: BondCtx, id: string, want: string): Promise<{ ok: boolean; text: string }> {
+  const name = pick(id).title
+
+  if (want === 'none') {
+    const next = await update($, bondHats, h => {
+      const rest = { ...h }
+      delete rest[id]
+
+      return rest
+    })
+    await $.store.set('bondHats', next)
+
+    return { ok: true, text: `${name} wears no hat.` }
+  }
+
+  const hat = HATS[want]
+  if (!hat) return { ok: false, text: `Unknown hat: ${want}. Options: ${HAT_ORDER.join(', ')}, none.` }
+
+  const points = (await read($, bondPoints))[id] ?? 0
+  if (points < hat.need) {
+    return { ok: false, text: `${hat.title} unlocks at ${hat.need} bond turns; ${name} has ${points}.` }
+  }
+
+  const next = await update($, bondHats, h => ({ ...h, [id]: want }))
+  await $.store.set('bondHats', next)
+
+  return { ok: true, text: `${name} wears the ${hat.title}.` }
+}
+
+// /pixel-agent hat ve /pixel-agent bond; başka komutsa undefined döner
+async function bondCommand($: BondCtx, head: string, rest: string[]): Promise<{ text: string } | undefined> {
+  if (head !== 'hat' && head !== 'bond') return undefined
+
+  const id = await read($, character)
+  const name = pick(id).title
+  const points = (await read($, bondPoints))[id] ?? 0
+
+  if (head === 'bond') {
+    const next = nextUnlock(points)
+    const tail = next
+      ? `Next hat: ${HATS[next.id]?.title ?? next.id} at ${next.need} (${next.need - points} to go).`
+      : 'All hats unlocked.'
+
+    return { text: `${name}: bond ${points} turns. ${tail}` }
+  }
+
+  const want = rest.join('')
+
+  if (want === '') {
+    const open = !(await read($, bondHatPicking))
+    await update($, bondHatPicking, () => open)
+    await update($, picking, () => false)
+    await update($, isHidden, () => false)
+
+    return {
+      text: open
+        ? 'Hat list is open above the prompt: move with the arrow keys and press Enter. Locked hats show their bond turns. Run /pixel-agent hat again to close it.'
+        : 'Hat list closed.',
+    }
+  }
+
+  const res = await bondChooseHat($, id, want === 'off' ? 'none' : want)
+  if (res.ok) {
+    await update($, bondHatPicking, () => false)
+    await update($, isHidden, () => false)
+  }
+
+  return { text: res.text }
+}
+// ---BAĞ-END---
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'pixel-agent',
       description:
-        'Show or hide the pixel agent, pick a character (bit, ghost, astronaut, wizard, cloud, random, list) or a color theme (theme <name|next>)',
+        'Show or hide the pixel agent, change the character (switch opens a list, random, list, or a name like cat, fox, wizard) or the color theme (theme <name|next|auto>, auto follows the time of day), session stats (stats), or the speech bubble (chatter on|off), the bond (bond), or a hat (hat opens a list, hat <name|none>)',
     })
+
+    await statReset($) // İSTATİSTİK: oturum sayaçları sıfırlanır
 
     // Önceki oturumda seçilen karakteri geri yükle
     const saved = await $.store.get('character')
@@ -813,23 +2051,52 @@ export const register: Register = on => {
       await update($, theme, () => savedTheme)
     }
 
+    // ---BAĞ-START--- (karakter yukarıda geri yüklendikten sonra)
+    await bondRestore($).catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+    // ---BAĞ-END---
+
+    // ---HAREKET-START---
+    // Auto tema kalıcıdır; açılışta saate göre hemen seçilir (sayaç bir tik sonra izler)
+    if ((await $.store.get('themeAuto')) === true) {
+      await update($, themeAuto, () => true)
+      await update($, theme, () => autoThemeFor(new Date().getHours()))
+    }
+    // ---HAREKET-END---
+
+    // ---BALON-START---
+    const savedChatter = await $.store.get('chatter')
+    if (typeof savedChatter === 'boolean') {
+      await update($, balonOn, () => savedChatter)
+    }
+    // ---BALON-END---
+
     const seen = new Map<string, Seen>()
     // Süresi dolup bantan düşen ajanlar; motor kaydı listede tutsa bile geri eklenmesin
     const dismissed = new Set<string>()
     const typeChar = new Map<string, string>()
     let lastRoster = ''
 
-    // Her alt ajan türü ilk görüldüğü sırayla bir karakter alır; aynı anda çalışan
-    // farklı türler karışmaz, aynı tür hep aynı karakterdir
+    // ---ROL-START---
+    // Bilinen türler sabit karakter alır (ROLE_CHARS). Bilinmeyenler ilk görülme sırasıyla,
+    // sabit rollerin kullanmadığı havuzdan atanır; aynı tür hep aynı karakterdir
+    let spareUsed = 0
     const charFor = (type: string): string => {
       const known = typeChar.get(type)
       if (known) return known
 
-      const assigned = ORDER[typeChar.size % ORDER.length] ?? 'bit'
+      const fixed = ROLE_CHARS[roleKey(type)]
+      if (fixed) {
+        typeChar.set(type, fixed)
+        return fixed
+      }
+
+      const assigned = SPARE_CHARS[spareUsed % SPARE_CHARS.length] ?? 'bit'
+      spareUsed += 1
       typeChar.set(type, assigned)
 
       return assigned
     }
+    // ---ROL-END---
 
     // Alt ajanları motorun listesinden okur. Biten ajan HOLD_MS boyunca "bitti"
     // olarak kalır; listeden izsiz düşen ajan da bitmiş sayılır.
@@ -902,6 +2169,16 @@ export const register: Register = on => {
       }
     }
 
+    // ---HAREKET-START---
+    // Saati render'da değil burada okur (render saf kalır); atomu yalnız tema değişince yazar
+    const trackTheme = async () => {
+      if (!(await read($, themeAuto))) return
+
+      const want = autoThemeFor(new Date().getHours())
+      if ((await read($, theme)) !== want) await update($, theme, () => want)
+    }
+    // ---HAREKET-END---
+
     // Yalnızca görünürken kare ilerlet ve alt ajanları izle; gizliyken yeniden çizim yok
     $.clock.every(450, () => {
       void read($, isHidden)
@@ -909,6 +2186,7 @@ export const register: Register = on => {
           if (hidden) return
           await update($, frame, n => (n + 1) % FRAME_WRAP)
           await trackIdle()
+          await trackTheme() // HAREKET: auto tema
           await track()
         })
         .catch(err => {
@@ -925,13 +2203,43 @@ export const register: Register = on => {
     const list = ORDER.map(id => `${id} (${pick(id).title})`).join(', ')
     const [head = '', ...rest] = arg.split(/\s+/)
 
+    // ---BALON-START---
+    if (head === 'chatter') {
+      const want = rest[0] ?? ''
+
+      if (want !== '' && want !== 'on' && want !== 'off') {
+        return { text: `Unknown option: ${want}. Use /pixel-agent chatter on, off, or no argument to toggle.` }
+      }
+
+      const enabled = want === '' ? !(await read($, balonOn)) : want === 'on'
+      await update($, balonOn, () => enabled)
+      await $.store.set('chatter', enabled)
+
+      return { text: enabled ? 'Speech bubble on.' : 'Speech bubble off.' }
+    }
+    // ---BALON-END---
+
     if (head === 'theme') {
       const want = rest[0] ?? ''
       const themes = THEME_ORDER.map(id => `${id} (${THEMES[id]?.title ?? id})`).join(', ')
 
       if (want === '') {
-        return { text: `Themes: ${themes}. Pick one with /pixel-agent theme <name>, or switch with /pixel-agent theme next.` }
+        const auto = (await read($, themeAuto)) ? ' Auto is on.' : ''
+
+        return { text: `Themes: ${themes}. Pick one with /pixel-agent theme <name>, switch with /pixel-agent theme next, or follow the time of day with /pixel-agent theme auto.${auto}` }
       }
+
+      // ---HAREKET-START---
+      if (want === 'auto') {
+        const now = autoThemeFor(new Date().getHours())
+        await update($, themeAuto, () => true)
+        await update($, theme, () => now)
+        await update($, isHidden, () => false)
+        await $.store.set('themeAuto', true)
+
+        return { text: `Theme: auto (${THEMES[now]?.title ?? now} now; morning Ocean, day Classic, evening Ember, night Mono).` }
+      }
+      // ---HAREKET-END---
 
       let chosen = want
       if (want === 'next') {
@@ -940,15 +2248,25 @@ export const register: Register = on => {
       }
 
       if (!THEME_ORDER.includes(chosen)) {
-        return { text: `Unknown theme: ${want}. Options: ${themes}.` }
+        return { text: `Unknown theme: ${want}. Options: ${themes}, auto.` }
       }
 
+      // HAREKET: elle tema seçimi auto'yu kapatır
+      await update($, themeAuto, () => false)
+      await $.store.set('themeAuto', false)
       await update($, theme, () => chosen)
       await update($, isHidden, () => false)
       await $.store.set('theme', chosen)
 
       return { text: `Theme: ${THEMES[chosen]?.title ?? chosen}.` }
     }
+
+    if (head === 'stats') return { text: await statsText($) } // İSTATİSTİK
+
+    // ---BAĞ-START---
+    const bondRes = await bondCommand($, head, rest)
+    if (bondRes) return bondRes
+    // ---BAĞ-END---
 
     if (arg === '') {
       const hide = !(await read($, isHidden))
@@ -958,7 +2276,22 @@ export const register: Register = on => {
     }
 
     if (arg === 'list') {
-      return { text: `Characters: ${list}. Pick one with /pixel-agent <name>, or get a random one with /pixel-agent random.` }
+      return { text: `Characters: ${list}. Pick one with /pixel-agent <name>, from a list with /pixel-agent switch, or get a random one with /pixel-agent random.` }
+    }
+
+    // Karakter listesi bantta açılır; ikinci çağrı kapatır
+    if (arg === 'switch') {
+      const open = !(await read($, picking))
+      await update($, picking, () => open)
+      // İki liste aynı anda açık kalıp üst üste binmesin
+      if (open) await update($, bondHatPicking, () => false)
+      await update($, isHidden, () => false)
+
+      return {
+        text: open
+          ? 'Character list is open above the prompt: move with the arrow keys and press Enter (or click an option). Run /pixel-agent switch again to close it.'
+          : 'Character list closed.',
+      }
     }
 
     let chosen = arg
@@ -981,6 +2314,11 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     await update($, mode, () => 'work')
     await update($, label, () => '')
+    // Liste yeni bir istekte kendiliğinden kapanır
+    await update($, picking, () => false)
+    await update($, bondHatPicking, () => false) // BAĞ: şapka listesi de kapanır
+    await update($, balonErrStreak, () => 0) // BALON: yeni tur temiz başlar
+    await statTurnBegin($) // İSTATİSTİK
 
     return next(e)
   }).catch(($, e, next) => next(e)) // karakter hata verirse istek engellenmesin
@@ -988,11 +2326,15 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     await update($, mode, () => 'work')
     await update($, label, () => e.tool)
+    await statToolCall($, e.tool) // İSTATİSTİK
 
     const ran = await next(e)
+    // BALON: hatada seriyi artır, başarıda sıfırla
+    await update($, balonErrStreak, n => ((ran as { isError?: boolean }).isError === true ? n + 1 : 0))
 
     if ((ran as { isError?: boolean }).isError === true) {
       await update($, mode, () => 'err')
+      await statToolError($) // İSTATİSTİK
       // Hata kısa süre görünsün, tur sürüyorsa çalışma haline dönsün
       $.clock.after(1500, () => {
         void read($, mode).then(m => {
@@ -1005,16 +2347,25 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e)) // karakter hata verirse araç çağrısı engellenmesin
 
   on('turn.complete', async ($, e, next) => {
+    // İSTATİSTİK: ok'tan önce yazılır ki ilk "ok" karesi süreyi/uzun kutlamayı hazır bulsun
+    const okHoldMs = await statTurnEnd($)
     await update($, mode, () => 'ok')
+    await update($, balonTurns, n => (n + 1) % 1000) // BALON: "bitti" varyasyonu
     await update($, label, () => '')
-    $.clock.after(4000, () => {
+    $.clock.after(okHoldMs, () => {
       void read($, mode).then(m => {
         if (m === 'ok') void update($, mode, () => 'idle')
       })
     })
 
+    // ---BAĞ-START---
+    if (e.agentId === undefined && e.reason === 'answer') {
+      await bondTurnDone($).catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+    }
+    // ---BAĞ-END---
+
     return next(e)
-  })
+  }).catch(($, e, next) => next(e)) // sayaç hatası turu bitirmeyi engellemesin
 
   // Bağlam doluluğu motordan itilir (her turdan sonra); percent taze oturumda ve
   // /compact sonrası ilk yanıta kadar yoktur, o zaman -1 (çubuk gizli)
@@ -1051,11 +2402,20 @@ export const register: Register = on => {
     const characterId = await read($, character)
     const spec = themed(pick(characterId), themeId)
     const pct = await read($, ctx)
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Box, Button, Select, Text } = $.ui.resolve(e)
+    const isPicking = await read($, picking)
     // Terminal tablosunda Svg yok; VS Code / masaüstü / mobilde var
     const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve(e).Svg
 
-    const canvas = compose(spec, m, f, { cw, idleTicks, tool, tired: pct >= CTX_TIRED })
+    // ---BAĞ-START---
+    const bondPts = (await read($, bondPoints))[characterId] ?? 0
+    const bondHat = activeHat(await read($, bondHats), bondPts, characterId)
+    const bondNote = await read($, bondWelcome)
+    const isHatPicking = await read($, bondHatPicking)
+    // ---BAĞ-END---
+    const statTurnNow = await read($, statTurn) // İSTATİSTİK
+    const statDoneSec = await read($, statDone) // İSTATİSTİK
+    const canvas = compose(spec, m, f, { cw, idleTicks, tool, tired: pct >= CTX_TIRED, hat: bondHat,long: m === 'ok' && statDoneSec >= 0 })
     const rows = Array.from({ length: ROWS }, (_, i) =>
       rowRuns(canvas[i * 2] ?? [], canvas[i * 2 + 1] ?? [], cw),
     )
@@ -1109,7 +2469,7 @@ export const register: Register = on => {
 
     const header = (
       <Text wrap="truncate-end">
-        {spec.title} <Text dimColor>· {base}{crew}</Text>
+        {spec.title} <Text dimColor>· {statLine(base, m, f, statTurnNow, statDoneSec)}{crew}{bondNote ? ` · ${bondNote}` : ''}</Text>
       </Text>
     )
     const hideButton = <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
@@ -1125,24 +2485,13 @@ export const register: Register = on => {
       />
     )
 
-    // Bağlam çubuğu: ölçüm gelene kadar gizli; eşikleri aşınca sarı/kırmızı
-    const cells = columns >= 90 ? 10 : 6
-    const filled = Math.round((Math.min(100, pct) / 100) * cells)
-    const ctxBar =
-      pct >= 0 && rightW >= 44 ? (
-        <Text wrap="truncate-end" color={pct >= CTX_TIRED ? RED : pct >= CTX_WARN ? AMBER : undefined} dimColor={pct < CTX_WARN}>
-          ctx {'█'.repeat(filled)}
-          {'░'.repeat(cells - filled)} {pct}%
-        </Text>
-      ) : null
-
     const minis = lines.map((line, li) => (
       <Box key={`mini-satir-${li}`} gap={MINI_GAP}>
         {line.map(({ a, short, w }) => {
           const since = (f - a.enteredFrame + FRAME_WRAP) % FRAME_WRAP
           const left =
             a.endedFrame === undefined ? undefined : HOLD_TICKS - ((f - a.endedFrame + FRAME_WRAP) % FRAME_WRAP)
-          const grid = composeMini(a.char, a.mode, f, miniSlide(since, left), themeId)
+          const grid = composeMini(a.char, a.mode, f, miniSlide(since, left), themeId, a.type)
           const miniRows = Array.from({ length: MH / 2 }, (_, i) =>
             rowRuns(grid[i * 2] ?? [], grid[i * 2 + 1] ?? [], MW),
           )
@@ -1172,6 +2521,28 @@ export const register: Register = on => {
       </Box>
     ))
 
+    // ---BALON-START---
+    // Ayrı satır; alt ajan satırı varken (tight dahil) ve sağ sütun darken çizilmez, böylece
+    // Hide/Random düğmeleri ve alt ajan düzeni yer değiştirmez
+    const balonStreak = await read($, balonErrStreak)
+    const balonLine =
+      lines.length === 0 && rightW >= BALON_MIN_W
+        ? balonText({
+            on: await read($, balonOn),
+            m,
+            tool,
+            streak: balonStreak,
+            tired: pct >= CTX_TIRED,
+            turns: await read($, balonTurns),
+          })
+        : ''
+    const balon = balonLine ? (
+      <Text key="balon" italic dimColor wrap="truncate-end">
+        {`“${balonLine}”`}
+      </Text>
+    ) : null
+    // ---BALON-END---
+
     // Hide sağ üst köşede, Random sağ alt köşede. Alt ajan yokken alt satırın soluna komut ipucu
     // gelir; alt ajan varken sprite'larla birlikte sağ sütun sprite yüksekliğini aşmasın diye atlanır.
     // Bant dar ise (tight) Random alt satır yerine üstte Hide'ın yanına alınır.
@@ -1181,12 +2552,12 @@ export const register: Register = on => {
         <Box gap={2} justifyContent="space-between">
           <Box flexShrink={1}>{header}</Box>
           <Box gap={2} flexShrink={0}>
-            {ctxBar}
             {tight ? randomButton : null}
             {hideButton}
           </Box>
         </Box>
         {lines.length > 0 ? <Box flexDirection="column">{minis}</Box> : null}
+        {balon}
         {tight ? null : (
           <Box gap={2} justifyContent={showHint ? 'space-between' : 'flex-end'}>
             {showHint ? (
@@ -1201,6 +2572,53 @@ export const register: Register = on => {
         )}
       </Box>
     )
+
+    // Karakter listesi: seçilince karakter kalıcı kaydedilir ve liste kapanır
+    const picker = isPicking ? (
+      <Select
+        key="character"
+        label="Character"
+        options={ORDER.map(id => ({ value: id, label: pick(id).title }))}
+        value={characterId}
+        autoFocus
+        onSelect={id => {
+          if (!ORDER.includes(id)) return
+
+          void (async () => {
+            await update($, character, () => id)
+            await update($, picking, () => false)
+            await $.store.set('character', id)
+          })().catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+        }}
+      />
+    ) : null
+
+    // ---BAĞ-START--- (şapka listesi; kilitli şapka seçilemez, eşiği söyler)
+    const hatPicker = isHatPicking ? (
+      <Select
+        key="hat"
+        label={`Hat (bond ${bondPts})`}
+        options={[
+          { value: 'none', label: 'No hat' },
+          ...HAT_ORDER.map(h => {
+            const hat = HATS[h]
+            const need = hat?.need ?? 0
+
+            return { value: h, label: bondPts >= need ? (hat?.title ?? h) : `${hat?.title ?? h} (locked, ${need} turns)` }
+          }),
+        ]}
+        value={bondHat ?? 'none'}
+        autoFocus
+        onSelect={choice => {
+          void (async () => {
+            const res = await bondChooseHat($, characterId, choice)
+            if (res.ok) await update($, bondHatPicking, () => false)
+            else $.ui.toast(res.text)
+          })().catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+        }}
+      />
+    ) : null
+    // ---BAĞ-END---
 
     const rule = '─'.repeat(Math.min(columns, 100))
 
@@ -1226,6 +2644,8 @@ export const register: Register = on => {
           </Box>
           {right}
         </Box>
+        {picker}
+        {hatPicker}
         {framed && isTerminal ? <Text dimColor wrap="truncate">{rule}</Text> : null}
       </Box>
     )
