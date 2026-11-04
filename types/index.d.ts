@@ -28,6 +28,8 @@ declare module 'claude-code' {
       ctx: number
       // Karakter seçim listesi açık mı (/pixel-agent switch)
       picking: boolean
+      // Alt ajanlar iki satıra açık mı; false: tek satır (Expand/Collapse düğmesi)
+      miniExpanded: boolean
       // İstatistik: çalışan turun başlangıcı (startFrame -1: tur yok) ve araç sayısı
       statTurn: { startMs: number; startFrame: number; tools: number }
       // Uzun biten turun süresi (sn); -1: uzun değil / tur sürüyor

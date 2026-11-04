@@ -26,8 +26,10 @@ function autoThemeFor(hour: number): string {
 }
 // ---HAREKET-END---
 const ctx = atom({ plugin: 'pixel-agent', key: 'ctx' } as const, -1)
-// /pixel-agent switch ile açılan karakter listesi (Select) görünüyor mu
+// /pixel-agent switch ile açılan karakter ızgarası görünüyor mu
 const picking = atom({ plugin: 'pixel-agent', key: 'picking' } as const, false)
+// Alt ajanlar iki satıra açık mı (false: tek satıra indirilmiş)
+const miniExpanded = atom({ plugin: 'pixel-agent', key: 'miniExpanded' } as const, true)
 // ---BAĞ-START--- (atomlar)
 // Karakter başına bağ puanı (başarılı tur sayısı) ve karakter başına seçili şapka
 const bondPoints = atom({ plugin: 'pixel-agent', key: 'bondPoints' } as const, {} as Record<string, number>)
@@ -1753,14 +1755,80 @@ const FRAMED_ROWS = ROWS + 2
 
 // Alt ajan adı en fazla bu kadar karakter gösterilir; daha uzunu kesilir
 const NAME_MAX = 24
-// Alt ajan sprite'ı (MH / 2 satır) + altındaki ad satırı
-const MINI_ROWS = MH / 2 + 1
+// Alt ajan: üstündeki durum (ikon veya yazı) satırı + sprite (MH / 2 satır) + altındaki ad satırı
+const MINI_ROWS = MH / 2 + 2
 // Alt ajanlar arası boşluk (hücre)
 const MINI_GAP = 1
 // Alt ajan yokken ve alt ajanlı bantta: üst satır (başlık) + alt satır (Random) = 2 satır
 const CHROME_ROWS = 2
-// Alt ajan satırı sayısının varsayılan üst sınırı (maxRows yoksa)
-const MAX_MINI_LINES = 3
+// Sprite'lı alt ajan satırı sayısı: açıkken iki, Collapse'ta bir. Sığmayan ajanlar alt satırda
+// "+3 agents running" diye özetlenir
+const MAX_MINI_LINES = 2
+
+// Alt ajanın üstünde yazan durum (ana karakterin STATUS'undan ayrı: "tool failed" sütuna sığmaz)
+const SUB_STATUS: Record<Mode, string> = {
+  idle: 'waiting',
+  work: 'working',
+  ok: 'done',
+  err: 'failed',
+}
+
+// Durum ikonları: VS Code / masaüstü / mobilde yazı yerine 8x8 piksel SVG (svgOf ile çizilir);
+// terminalde SVG yok, orada durum yazıyla kalır. '#' dolu piksel.
+const ICON = 8
+const ICON_SCALE = 2
+const ICON_DIM = '#6B7C93'
+const ICON_GREEN = '#4FB286'
+const ICON_MOON = '#E8D48A'
+
+type IconKind = 'ready' | 'sleep' | 'wait' | 'work' | 'ok' | 'err'
+
+const ICON_SHAPES: Record<Exclude<IconKind, 'work'>, { color: string; rows: string[] }> = {
+  // Halka + nokta: hazır
+  ready: { color: ICON_DIM, rows: ['..####..', '.#....#.', '#......#', '#..##..#', '#..##..#', '#......#', '.#....#.', '..####..'] },
+  // Hilal: uyuyor
+  sleep: { color: ICON_MOON, rows: ['..###...', '.##.....', '##......', '##......', '##......', '.##...##', '..#####.', '........'] },
+  // Kum saati: alt ajan bekliyor
+  wait: { color: ICON_DIM, rows: ['########', '.#....#.', '..#..#..', '...##...', '...##...', '..#..#..', '.#.##.#.', '########'] },
+  // Onay işareti: bitti
+  ok: { color: ICON_GREEN, rows: ['........', '......##', '.....##.', '#...##..', '##.##...', '.###....', '..#.....', '........'] },
+  // Çarpı: hata
+  err: { color: RED, rows: ['##....##', '.##..##.', '..####..', '...##...', '..####..', '.##..##.', '##....##', '........'] },
+}
+
+// Çalışıyor: üç nokta, kare başına biri vurgulanır
+function iconCanvas(kind: IconKind, f: number): Px[][] {
+  const canvas: Px[][] = Array.from({ length: ICON }, () => Array<Px>(ICON).fill(undefined))
+
+  if (kind === 'work') {
+    for (let i = 0; i < 3; i += 1) {
+      const color = i === f % 3 ? AMBER : '#4A4440'
+
+      for (const y of [3, 4]) {
+        for (const x of [i * 3, i * 3 + 1]) {
+          const row = canvas[y]
+          if (row) row[x] = color
+        }
+      }
+    }
+
+    return canvas
+  }
+
+  const shape = ICON_SHAPES[kind]
+  shape.rows.forEach((line, y) => {
+    const row = canvas[y]
+    if (!row) return
+
+    for (let x = 0; x < ICON; x += 1) {
+      if (line.charAt(x) === '#') row[x] = shape.color
+    }
+  })
+
+  return canvas
+}
+
+const iconSvg = (kind: IconKind, f: number): string => svgOf(iconCanvas(kind, f), ICON, ICON_SCALE)
 
 // ---İSTATİSTİK-START---
 // Tur süresi / araç sayacı, uzun iş kutlaması ve /pixel-agent stats. Sayaçlar oturum
@@ -1856,6 +1924,19 @@ function statLine(base: string, m: Mode, f: number, turn: StatTurn, doneSec: num
   }
 
   return base
+}
+
+// SVG yüzeylerinde durum kelimesi ikonla gösterilir; başlıkta yalnız süre ve araç sayısı kalır
+function statLineIcon(m: Mode, f: number, turn: StatTurn, doneSec: number): string {
+  if (m === 'ok' && doneSec >= 0) return `done in ${fmtClock(doneSec)}`
+
+  if ((m === 'work' || m === 'err') && turn.startFrame >= 0) {
+    const ticks = (f - turn.startFrame + FRAME_WRAP) % FRAME_WRAP
+
+    return `${fmtClock((ticks * TICK_MS) / 1000)} · ${plural(turn.tools, 'tool')}`
+  }
+
+  return ''
 }
 // ---İSTATİSTİK-END---
 
@@ -2289,7 +2370,7 @@ export const register: Register = on => {
 
       return {
         text: open
-          ? 'Character list is open above the prompt: move with the arrow keys and press Enter (or click an option). Run /pixel-agent switch again to close it.'
+          ? 'Character list is open above the prompt: click a character (or move with Tab and press Enter). Run /pixel-agent switch again to close it.'
           : 'Character list closed.',
       }
     }
@@ -2422,56 +2503,80 @@ export const register: Register = on => {
     const roster = await read($, agents)
     // Sağ sütun sprite'tan kalan genişliktir; metinler sığmazsa sarılmaz, kesilir
     const rightW = Math.max(10, columns - cw - 2)
-    const frameRows = framed ? 2 : 0
-    // Alt ajanlı bant (üst satır + sprite + ad + Random satırı) sığmıyorsa Random alt satıra
-    // değil, üst satıra (Hide yanına) alınır ve yalnız tek alt ajan satırı çizilir
+    // Üst boşluk: SVG yüzeylerinde ikon satırı için bir satır fazla; zemin çizgisi yalnız terminalde
+    const topGap = Svg ? 2 : 1
+    const frameRows = framed ? topGap + (isTerminal ? 1 : 0) : 0
+    // Alt ajanlı bant (üst satır + durum + sprite + ad + Random satırı) sığmıyorsa Random üst
+    // satıra (Hide yanına) alınır ve sprite çizilmez; ajanlar "N agents running" diye özetlenir
     const tight = roster.length > 0 && maxRows !== undefined && maxRows - frameRows < CHROME_ROWS + MINI_ROWS
-    const maxMiniLines =
+    const fitLines =
       maxRows === undefined
         ? MAX_MINI_LINES
         : tight
-          ? 1
-          : Math.max(1, Math.floor((maxRows - frameRows - CHROME_ROWS) / MINI_ROWS))
+          ? 0
+          : Math.min(MAX_MINI_LINES, Math.floor((maxRows - frameRows - CHROME_ROWS) / MINI_ROWS))
+    const expanded = await read($, miniExpanded)
+    const maxMiniLines = Math.min(fitLines, expanded ? MAX_MINI_LINES : 1)
 
-    // Her alt ajan adı kadar geniş (en az sprite genişliği) bir sütun alır; yan yana dizilir,
-    // sığmayan alt satıra geçer, satır sınırını aşanlar "hidden" sayılır
+    // Her alt ajan adı kadar geniş (en az sprite genişliği) bir sütun alır; sola yaslı yan yana
+    // dizilir, sığmayan alt satıra geçer
     const items = roster.map(a => {
-      const short = (a.type.split(':').pop() ?? a.type).slice(0, Math.min(NAME_MAX, rightW))
+      const full = a.type.split(':').pop() ?? a.type
+      const short = full.slice(0, Math.min(NAME_MAX, rightW))
 
-      return { a, short, w: Math.max(MW, short.length) }
+      return { a, full, short, w: Math.max(MW, short.length) }
     })
-    const lines: (typeof items)[] = []
-    let used = 0
+    type MiniItem = (typeof items)[number]
 
-    for (const it of items) {
-      const last = lines[lines.length - 1]
+    const pack = (maxLines: number): MiniItem[][] => {
+      const out: MiniItem[][] = []
+      let used = 0
 
-      if (last && used + MINI_GAP + it.w <= rightW) {
-        last.push(it)
-        used += MINI_GAP + it.w
-      } else if (lines.length < maxMiniLines) {
-        lines.push([it])
-        used = it.w
-      } else {
-        break
+      for (const it of items) {
+        const last = out[out.length - 1]
+
+        if (last && used + MINI_GAP + it.w <= rightW) {
+          last.push(it)
+          used += MINI_GAP + it.w
+        } else if (out.length < maxLines) {
+          out.push([it])
+          used = it.w
+        } else {
+          break
+        }
       }
+
+      return out
     }
 
-    const hidden = roster.length - lines.reduce((n, line) => n + line.length, 0)
-    const busy = roster.filter(a => a.mode === 'work').length
+    const lines = pack(maxMiniLines)
+    // Tek satıra sığmayan ama iki satıra sığan ajan varken Expand/Collapse düğmesi çıkar
+    const canToggle = fitLines >= MAX_MINI_LINES && pack(MAX_MINI_LINES).length > 1
+
+    // Sprite satırlarına sığmayanlar alt satırda özetlenir: "+3 agents running"
+    const overflow = items.slice(lines.reduce((n, line) => n + line.length, 0))
+    const overRunning = overflow.filter(o => o.a.mode === 'work').length
+    const overflowText = overflow.length
+      ? `${lines.length > 0 ? '+' : ''}${plural(overflow.length, 'agent')}${
+          overRunning === overflow.length ? ' running' : overRunning > 0 ? ` · ${overRunning} running` : ''
+        }`
+      : ''
 
     const asleep = m === 'idle' && idleTicks >= SLEEP_AFTER
     const base = asleep ? 'sleeping' : m === 'work' && tool ? `${STATUS[m]} · ${tool}` : STATUS[m]
-    const crew =
-      roster.length > 0
-        ? ` · subagents ${busy} running / ${roster.length} total${hidden > 0 ? ` (+${hidden} hidden)` : ''}`
-        : ''
+    const mainKind: IconKind = m === 'idle' ? (asleep ? 'sleep' : 'ready') : m
 
+    // SVG yüzeylerinde durum ikonla gösterilir, başlıkta yalnız süre/araç sayısı kalır
+    const headerNote = [Svg ? statLineIcon(m, f, statTurnNow, statDoneSec) : statLine(base, m, f, statTurnNow, statDoneSec), bondNote]
+      .filter(Boolean)
+      .join(' · ')
     const header = (
       <Text wrap="truncate-end">
-        {spec.title} <Text dimColor>· {statLine(base, m, f, statTurnNow, statDoneSec)}{crew}{bondNote ? ` · ${bondNote}` : ''}</Text>
+        {spec.title}
+        {headerNote ? <Text dimColor>{` · ${headerNote}`}</Text> : null}
       </Text>
     )
+
     const hideButton = <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
     const randomButton = (
       <Button
@@ -2485,6 +2590,14 @@ export const register: Register = on => {
       />
     )
 
+    const toggleButton = canToggle ? (
+      <Button
+        key="expand"
+        label={expanded ? 'Collapse' : 'Expand'}
+        onPress={() => update($, miniExpanded, v => !v)}
+      />
+    ) : null
+
     const minis = lines.map((line, li) => (
       <Box key={`mini-satir-${li}`} gap={MINI_GAP}>
         {line.map(({ a, short, w }) => {
@@ -2496,21 +2609,36 @@ export const register: Register = on => {
             rowRuns(grid[i * 2] ?? [], grid[i * 2 + 1] ?? [], MW),
           )
 
-          // Terminalde sütun, ad kadar geniş sabit hücre; Svg yüzeylerinde içeriğe göre
+          // Terminalde sütun, ad kadar geniş sabit hücre; Svg yüzeylerinde içeriğe göre.
+          // Durum, sprite ve ad sütunda ortalanır; sütunlar satırda sola yaslıdır
           return (
-            <Box key={`mini-${a.id}`} flexDirection="column" flexShrink={0} width={isTerminal ? w : undefined}>
+            <Box key={`mini-${a.id}`} flexDirection="column" alignItems="center" flexShrink={0} width={isTerminal ? w : undefined}>
+              {Svg ? (
+                <Svg
+                  source={iconSvg(a.mode === 'idle' ? 'wait' : a.mode, f)}
+                  alt={`${short} ${SUB_STATUS[a.mode]}`}
+                  width={ICON * ICON_SCALE}
+                  height={ICON * ICON_SCALE}
+                />
+              ) : (
+                <Text wrap="truncate-end" color={a.mode === 'err' ? RED : a.mode === 'work' ? AMBER : undefined} dimColor={a.mode === 'idle' || a.mode === 'ok'}>
+                  {SUB_STATUS[a.mode]}
+                </Text>
+              )}
               {Svg ? (
                 <Svg source={svgOf(grid, MW, PX_MINI)} alt={`${short} subagent`} width={MW * PX_MINI} height={MH * PX_MINI} />
               ) : (
-                miniRows.map((runs, i) => (
-                  <Text key={`m-${i}`} wrap="truncate">
-                    {runs.map((run, j) => (
-                      <Text key={`c-${j}`} color={run.color} backgroundColor={run.bg}>
-                        {run.text}
-                      </Text>
-                    ))}
-                  </Text>
-                ))
+                <Box flexDirection="column">
+                  {miniRows.map((runs, i) => (
+                    <Text key={`m-${i}`} wrap="truncate">
+                      {runs.map((run, j) => (
+                        <Text key={`c-${j}`} color={run.color} backgroundColor={run.bg}>
+                          {run.text}
+                        </Text>
+                      ))}
+                    </Text>
+                  ))}
+                </Box>
               )}
               <Text dimColor wrap="truncate-end">
                 {short}
@@ -2526,7 +2654,7 @@ export const register: Register = on => {
     // Hide/Random düğmeleri ve alt ajan düzeni yer değiştirmez
     const balonStreak = await read($, balonErrStreak)
     const balonLine =
-      lines.length === 0 && rightW >= BALON_MIN_W
+      lines.length === 0 && !overflowText && rightW >= BALON_MIN_W
         ? balonText({
             on: await read($, balonOn),
             m,
@@ -2543,10 +2671,24 @@ export const register: Register = on => {
     ) : null
     // ---BALON-END---
 
-    // Hide sağ üst köşede, Random sağ alt köşede. Alt ajan yokken alt satırın soluna komut ipucu
-    // gelir; alt ajan varken sprite'larla birlikte sağ sütun sprite yüksekliğini aşmasın diye atlanır.
+    // Hide sağ üst köşede, Random sağ alt köşede (yanında varsa Expand/Collapse). Alt satırın
+    // soluna: sığmayan ajanlar varsa "+3 agents running" özeti, alt ajan yokken komut ipucu.
     // Bant dar ise (tight) Random alt satır yerine üstte Hide'ın yanına alınır.
-    const showHint = lines.length === 0 && rightW >= 34
+    const showHint = lines.length === 0 && !overflowText && rightW >= 34
+    const bottomLeft =
+      lines.length > 0 && overflowText ? (
+        <Box flexShrink={1}>
+          <Text dimColor wrap="truncate-end">
+            {overflowText}
+          </Text>
+        </Box>
+      ) : showHint ? (
+        <Box flexShrink={1}>
+          <Text dimColor wrap="truncate-end">
+            /pixel-agent random
+          </Text>
+        </Box>
+      ) : null
     const right = (
       <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="space-between">
         <Box gap={2} justifyContent="space-between">
@@ -2557,40 +2699,49 @@ export const register: Register = on => {
           </Box>
         </Box>
         {lines.length > 0 ? <Box flexDirection="column">{minis}</Box> : null}
+        {lines.length === 0 && overflowText ? <Text dimColor>{overflowText}</Text> : null}
         {balon}
         {tight ? null : (
-          <Box gap={2} justifyContent={showHint ? 'space-between' : 'flex-end'}>
-            {showHint ? (
-              <Box flexShrink={1}>
-                <Text dimColor wrap="truncate-end">
-                  /pixel-agent random
-                </Text>
-              </Box>
-            ) : null}
-            <Box flexShrink={0}>{randomButton}</Box>
+          <Box gap={2} justifyContent={bottomLeft ? 'space-between' : 'flex-end'}>
+            {bottomLeft}
+            <Box gap={2} flexShrink={0}>
+              {toggleButton}
+              {randomButton}
+            </Box>
           </Box>
         )}
       </Box>
     )
 
     // Karakter listesi: seçilince karakter kalıcı kaydedilir ve liste kapanır
+    // Dikey Select yerine sarılan düğme ızgarası: 20 karakter birkaç satıra sığar, hepsi bir bakışta
+    // görünür; mevcut karakter vurgulu. Düğme adları tam yazılır, kesilmez.
     const picker = isPicking ? (
-      <Select
-        key="character"
-        label="Character"
-        options={ORDER.map(id => ({ value: id, label: pick(id).title }))}
-        value={characterId}
-        autoFocus
-        onSelect={id => {
-          if (!ORDER.includes(id)) return
-
-          void (async () => {
-            await update($, character, () => id)
-            await update($, picking, () => false)
-            await $.store.set('character', id)
-          })().catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
-        }}
-      />
+      <Box key="character" flexDirection="column" marginTop={1}>
+        <Box gap={2} justifyContent="space-between">
+          <Text dimColor wrap="truncate-end">
+            Character · pick one
+          </Text>
+          <Button key="character-close" label="Close" plain dimColor onPress={() => update($, picking, () => false)} />
+        </Box>
+        <Box flexWrap="wrap" gap={1}>
+          {ORDER.map(id => (
+            <Button
+              key={`character-${id}`}
+              label={pick(id).title}
+              variant={id === characterId ? 'primary' : 'secondary'}
+              autoFocus={id === characterId ? true : undefined}
+              onPress={() => {
+                void (async () => {
+                  await update($, character, () => id)
+                  await update($, picking, () => false)
+                  await $.store.set('character', id)
+                })().catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+              }}
+            />
+          ))}
+        </Box>
+      </Box>
     ) : null
 
     // ---BAĞ-START--- (şapka listesi; kilitli şapka seçilemez, eşiği söyler)
@@ -2623,13 +2774,17 @@ export const register: Register = on => {
     const rule = '─'.repeat(Math.min(columns, 100))
 
     return (
-      <Box flexDirection="column" marginTop={framed ? 1 : 0}>
+      <Box flexDirection="column" marginTop={framed ? topGap : 0}>
         {/* Varsayılan stretch: sağ sütun sprite yüksekliğine uzar; Hide üstte, Random altta kalır */}
         <Box gap={2}>
-          {/* Sprite sütunu sabit genişlikte; küçülürse satırlar sarılıp sprite kayar */}
-          <Box flexDirection="column" flexShrink={0} width={Svg ? undefined : cw}>
+          {/* Sprite sütunu sabit genişlikte; küçülürse satırlar sarılıp sprite kayar. SVG
+              yüzeylerinde durum ikonu sprite'ın üstünde ortalanır */}
+          <Box flexDirection="column" flexShrink={0} alignItems="center" width={Svg ? undefined : cw}>
             {Svg ? (
-              <Svg source={svgOf(canvas, cw, PX_MAIN)} alt={`${spec.title} pixel agent, ${base}`} width={cw * PX_MAIN} height={H * PX_MAIN} />
+              <>
+                <Svg source={iconSvg(mainKind, f)} alt={`${spec.title} ${base}`} width={ICON * ICON_SCALE} height={ICON * ICON_SCALE} />
+                <Svg source={svgOf(canvas, cw, PX_MAIN)} alt={`${spec.title} pixel agent, ${base}`} width={cw * PX_MAIN} height={H * PX_MAIN} />
+              </>
             ) : (
               rows.map((runs, i) => (
                 <Text key={`satir-${i}`} wrap="truncate">

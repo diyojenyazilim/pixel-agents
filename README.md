@@ -51,7 +51,7 @@ Check which version you have with `claude plugin list`. If it does not change, y
 - **It reacts to Claude.** Ready, working, done, tool failed, each with its own face and motion.
 - **It idles like a living thing.** Blinks, looks around, strolls to the side and back, yawns, and goes to sleep after a couple of minutes.
 - **It picks up a prop for the tool at hand.** A book for `Read`, a notepad for `Edit` and `Write`, a terminal for `Bash`, a magnifier for `Grep` and `Glob`, a globe for web tools.
-- **Subagents get companions.** Each one walks in beside the main character, works, celebrates or flinches when it ends, and walks out. The same agent type always gets the same character. Each companion shows its full agent name (for example `general-purpose`), and they line up side by side and wrap onto the next row when they do not fit.
+- **Subagents get companions.** Each one walks in beside the main character, works, celebrates or flinches when it ends, and walks out. The same agent type always gets the same character. Each companion shows a small status icon above it (waiting, working, done, failed) and its full agent name below it, centered on the name. Companions line up from the left, up to two rows; **Collapse** folds them to one row and **Expand** brings the second row back. Agents that do not fit are summarized at the bottom, for example `+3 agents running`. In the terminal, where images cannot be drawn, the status stays a word.
 - **It gets tired.** Once the context window is more than 85% full, the character looks tired.
 - **Each character has its own idle quirk.** The cat swishes its tail, the owl looks around, the slime hops, the dragon puffs smoke. It plays briefly between walks.
 - **It talks a little.** A short speech bubble follows the running tool ("into the terminal", "reading up"), three failures in a row, and a nearly full context.
@@ -65,7 +65,7 @@ Check which version you have with `claude plugin list`. If it does not change, y
 | Command | Does |
 | --- | --- |
 | `/pixel-agent` | Hide or show the agent |
-| `/pixel-agent switch` | Open the character list above the prompt, pick one with the arrow keys and Enter (run it again to close) |
+| `/pixel-agent switch` | Open a grid of all characters above the prompt and click one (or Tab to it and press Enter); run it again to close |
 | `/pixel-agent random` | Switch to a random character |
 | `/pixel-agent <name>` | `bit`, `ghost`, `astronaut`, `wizard`, `cloud`, `cat`, `fox`, `frog`, `penguin`, `owl`, `panda`, `bunny`, `dragon`, `pumpkin`, `alien`, `slime`, `mushroom`, `knight`, `octopus` or `cactus` |
 | `/pixel-agent list` | List the characters |
@@ -78,7 +78,7 @@ Check which version you have with `claude plugin list`. If it does not change, y
 | `/pixel-agent theme auto` | Follow your local time: morning Ocean, day Classic, evening Ember, night Mono. Picking any theme turns it off |
 | `/pixel-agent theme <name>` | `classic`, `mono`, `ember`, `forest`, `ocean` or `rose` |
 
-The band has two buttons: **Hide** in the top-right corner and **Random** in the bottom-right corner, which switches to a random character.
+The band has buttons in two corners: **Hide** in the top-right and **Random** in the bottom-right, which switches to a random character. **Expand** / **Collapse** sits next to Random when subagents need a second row.
 
 <div align="center">
   <img src="assets/hats.svg" alt="The six hats on the Penguin: beanie, cap, bucket, crown, tophat and halo" width="640" />
