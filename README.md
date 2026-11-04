@@ -27,7 +27,20 @@ Or inside a session:
 /plugin install pixel-agents@diyojenyazilim
 ```
 
-If a session is already open, run `/reload-plugins` or start a new one. To get a newer version later, run `claude plugin marketplace update diyojenyazilim`.
+If a session is already open, run `/reload-plugins` or start a new one.
+
+## Update
+
+A new version only shows up after you refresh the marketplace, then update the plugin:
+
+```bash
+claude plugin marketplace update diyojenyazilim
+claude plugin update pixel-agents@diyojenyazilim
+```
+
+Then restart Claude Code, or run `/reload-plugins` in an open session. The VS Code extension needs a window reload (`Developer: Reload Window`).
+
+Check which version you have with `claude plugin list`. If it does not change, you are already on the latest.
 
 ## What you get
 
@@ -67,7 +80,7 @@ The band also has a **Hide** button.
 
 ## Troubleshooting
 
-**The sprite looks shifted, torn or has its rows staggered.** Update the mod (`claude plugin marketplace update diyojenyazilim`, then `/reload-plugins`). Older versions let a narrow window squeeze the sprite column so its rows wrapped. If it still happens in the terminal, widen the window to at least 40 columns.
+**The sprite looks shifted, torn or has its rows staggered.** Update the mod (see [Update](#update)). Older versions let a narrow window squeeze the sprite column so its rows wrapped. If it still happens in the terminal, widen the window to at least 40 columns.
 
 A thin line between the rows of the sprite means your terminal is not drawing block characters edge to edge.
 
