@@ -9,7 +9,7 @@
       "name": "pixel-agent",
       "source": "./plugins/pixel-agent",
       "description": "A pixel-art agent above your prompt that reacts to Claude Code, with a small companion for every running subagent.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "category": "interface",
       "keywords": ["mod", "pixel-art", "ui", "subagents"]
     }
