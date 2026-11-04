@@ -4,17 +4,17 @@ A Claude Code mod that puts a small pixel-art agent above your prompt. It reacts
 
 ## Install
 
-Mods need Claude Code v2.1.287 or later. `pixel-agent` is listed in the [`diyojenyazilim/plugins`](https://github.com/diyojenyazilim/plugins) marketplace.
+Mods need Claude Code v2.1.287 or later. `pixel-agent` is listed in the [`diyojenyazilim/claude-plugins`](https://github.com/diyojenyazilim/claude-plugins) marketplace.
 
 ```bash
-claude plugin marketplace add diyojenyazilim/plugins
+claude plugin marketplace add diyojenyazilim/claude-plugins
 claude plugin install pixel-agent@diyojenyazilim
 ```
 
 Or inside a session:
 
 ```text
-/plugin marketplace add diyojenyazilim/plugins
+/plugin marketplace add diyojenyazilim/claude-plugins
 /plugin install pixel-agent@diyojenyazilim
 ```
 
@@ -80,8 +80,8 @@ A mod is code that runs with your permissions. This one only uses:
 It reads no files, starts no processes and makes no network requests. Check it yourself before you install it:
 
 ```bash
-git clone https://github.com/diyojenyazilim/pixel-agent.git
-claude plugin validate ./pixel-agent
+git clone https://github.com/diyojenyazilim/pixel-agents.git
+claude plugin validate ./pixel-agents
 ```
 
 Its `prompt.submit` and `tool.call` hooks have a `.catch` that passes the event through, so a bug in the mod cannot block a prompt or a tool call.
