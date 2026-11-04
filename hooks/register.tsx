@@ -776,12 +776,30 @@ const ROWS = H / 2
 // Üstte 1 satır boşluk + altta 1 satır zemin çizgisi; yer yoksa ikisi atlanıp yalnız sprite çizilir
 const FRAMED_ROWS = ROWS + 2
 
+// Alt ajan adı en fazla bu kadar karakter gösterilir; daha uzunu kesilir
+const NAME_MAX = 24
+// Alt ajan sprite'ı (MH / 2 satır) + altındaki ad satırı
+const MINI_ROWS = MH / 2 + 1
+// Alt ajanlar arası boşluk (hücre)
+const MINI_GAP = 1
+// Alt ajan yokken ve alt ajanlı bantta: üst satır (başlık) + alt satır (Random) = 2 satır
+const CHROME_ROWS = 2
+// Alt ajan satırı sayısının varsayılan üst sınırı (maxRows yoksa)
+const MAX_MINI_LINES = 3
+
+// Mevcut karakter dışından rastgele biri; tek karakter varsa aynısı döner
+function randomOther(current: string): string {
+  const pool = ORDER.filter(id => id !== current)
+
+  return pool[Math.floor(Math.random() * pool.length)] ?? current
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'pixel-agent',
       description:
-        'Show or hide the pixel agent, pick a character (bit, ghost, astronaut, wizard, cloud, next, list) or a color theme (theme <name|next>)',
+        'Show or hide the pixel agent, pick a character (bit, ghost, astronaut, wizard, cloud, random, list) or a color theme (theme <name|next>)',
     })
 
     // Önceki oturumda seçilen karakteri geri yükle
@@ -940,25 +958,24 @@ export const register: Register = on => {
     }
 
     if (arg === 'list') {
-      return { text: `Characters: ${list}. Pick one with /pixel-agent <name>, or switch with /pixel-agent next.` }
+      return { text: `Characters: ${list}. Pick one with /pixel-agent <name>, or get a random one with /pixel-agent random.` }
     }
 
-    let next = arg
+    let chosen = arg
 
-    if (arg === 'next') {
-      const current = await read($, character)
-      next = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length] ?? 'bit'
+    if (arg === 'random') {
+      chosen = randomOther(await read($, character))
     }
 
-    if (!ORDER.includes(next)) {
+    if (!ORDER.includes(chosen)) {
       return { text: `Unknown character: ${arg}. Options: ${list}.` }
     }
 
-    await update($, character, () => next)
+    await update($, character, () => chosen)
     await update($, isHidden, () => false)
-    await $.store.set('character', next)
+    await $.store.set('character', chosen)
 
-    return { text: `Character: ${pick(next).title}.` }
+    return { text: `Character: ${pick(chosen).title}.` }
   })
 
   on('prompt.submit', async ($, e, next) => {
@@ -1031,7 +1048,8 @@ export const register: Register = on => {
     const idleTicks = start < 0 ? 0 : (f - start + FRAME_WRAP) % FRAME_WRAP
     const tool = await read($, label)
     const themeId = await read($, theme)
-    const spec = themed(pick(await read($, character)), themeId)
+    const characterId = await read($, character)
+    const spec = themed(pick(characterId), themeId)
     const pct = await read($, ctx)
     const { Box, Button, Text } = $.ui.resolve(e)
     // Terminal tablosunda Svg yok; VS Code / masaüstü / mobilde var
@@ -1042,10 +1060,44 @@ export const register: Register = on => {
       rowRuns(canvas[i * 2] ?? [], canvas[i * 2 + 1] ?? [], cw),
     )
     const roster = await read($, agents)
-    // Alt ajan sprite'ları ana karakterin yanına sığacak kadar gösterilir
-    const slots = Math.max(0, Math.floor((columns - (cw + 4)) / MW))
-    const shown = roster.slice(0, slots)
-    const hidden = roster.length - shown.length
+    // Sağ sütun sprite'tan kalan genişliktir; metinler sığmazsa sarılmaz, kesilir
+    const rightW = Math.max(10, columns - cw - 2)
+    const frameRows = framed ? 2 : 0
+    // Alt ajanlı bant (üst satır + sprite + ad + Random satırı) sığmıyorsa Random alt satıra
+    // değil, üst satıra (Hide yanına) alınır ve yalnız tek alt ajan satırı çizilir
+    const tight = roster.length > 0 && maxRows !== undefined && maxRows - frameRows < CHROME_ROWS + MINI_ROWS
+    const maxMiniLines =
+      maxRows === undefined
+        ? MAX_MINI_LINES
+        : tight
+          ? 1
+          : Math.max(1, Math.floor((maxRows - frameRows - CHROME_ROWS) / MINI_ROWS))
+
+    // Her alt ajan adı kadar geniş (en az sprite genişliği) bir sütun alır; yan yana dizilir,
+    // sığmayan alt satıra geçer, satır sınırını aşanlar "hidden" sayılır
+    const items = roster.map(a => {
+      const short = (a.type.split(':').pop() ?? a.type).slice(0, Math.min(NAME_MAX, rightW))
+
+      return { a, short, w: Math.max(MW, short.length) }
+    })
+    const lines: (typeof items)[] = []
+    let used = 0
+
+    for (const it of items) {
+      const last = lines[lines.length - 1]
+
+      if (last && used + MINI_GAP + it.w <= rightW) {
+        last.push(it)
+        used += MINI_GAP + it.w
+      } else if (lines.length < maxMiniLines) {
+        lines.push([it])
+        used = it.w
+      } else {
+        break
+      }
+    }
+
+    const hidden = roster.length - lines.reduce((n, line) => n + line.length, 0)
     const busy = roster.filter(a => a.mode === 'work').length
 
     const asleep = m === 'idle' && idleTicks >= SLEEP_AFTER
@@ -1055,15 +1107,23 @@ export const register: Register = on => {
         ? ` · subagents ${busy} running / ${roster.length} total${hidden > 0 ? ` (+${hidden} hidden)` : ''}`
         : ''
 
-    // Sağ sütun sprite'tan kalan genişliktir; metinler sığmazsa sarılmaz, kesilir
-    const rightW = Math.max(10, columns - cw - 2)
-
     const header = (
       <Text wrap="truncate-end">
         {spec.title} <Text dimColor>· {base}{crew}</Text>
       </Text>
     )
     const hideButton = <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
+    const randomButton = (
+      <Button
+        key="random"
+        label="Random"
+        onPress={async () => {
+          const id = randomOther(characterId)
+          await update($, character, () => id)
+          await $.store.set('character', id)
+        }}
+      />
+    )
 
     // Bağlam çubuğu: ölçüm gelene kadar gizli; eşikleri aşınca sarı/kırmızı
     const cells = columns >= 90 ? 10 : 6
@@ -1076,76 +1136,78 @@ export const register: Register = on => {
         </Text>
       ) : null
 
-    const minis = shown.map(a => {
-      const since = (f - a.enteredFrame + FRAME_WRAP) % FRAME_WRAP
-      const left =
-        a.endedFrame === undefined ? undefined : HOLD_TICKS - ((f - a.endedFrame + FRAME_WRAP) % FRAME_WRAP)
-      const grid = composeMini(a.char, a.mode, f, miniSlide(since, left), themeId)
-      const miniRows = Array.from({ length: MH / 2 }, (_, i) =>
-        rowRuns(grid[i * 2] ?? [], grid[i * 2 + 1] ?? [], MW),
-      )
-      // Eklenti önekini at; terminalde sütun hizası bozulmasın diye sabit genişliğe tamamla
-      const short = (a.type.split(':').pop() ?? a.type).slice(0, MW - 1)
-      const name = isTerminal ? short.padEnd(MW) : short
+    const minis = lines.map((line, li) => (
+      <Box key={`mini-satir-${li}`} gap={MINI_GAP}>
+        {line.map(({ a, short, w }) => {
+          const since = (f - a.enteredFrame + FRAME_WRAP) % FRAME_WRAP
+          const left =
+            a.endedFrame === undefined ? undefined : HOLD_TICKS - ((f - a.endedFrame + FRAME_WRAP) % FRAME_WRAP)
+          const grid = composeMini(a.char, a.mode, f, miniSlide(since, left), themeId)
+          const miniRows = Array.from({ length: MH / 2 }, (_, i) =>
+            rowRuns(grid[i * 2] ?? [], grid[i * 2 + 1] ?? [], MW),
+          )
 
-      return (
-        <Box key={`mini-${a.id}`} flexDirection="column" flexShrink={0}>
-          {Svg ? (
-            <Svg source={svgOf(grid, MW, PX_MINI)} alt={`${short} subagent`} width={MW * PX_MINI} height={MH * PX_MINI} />
-          ) : (
-            miniRows.map((runs, i) => (
-              <Text key={`m-${i}`} wrap="truncate">
-                {runs.map((run, j) => (
-                  <Text key={`c-${j}`} color={run.color} backgroundColor={run.bg}>
-                    {run.text}
+          // Terminalde sütun, ad kadar geniş sabit hücre; Svg yüzeylerinde içeriğe göre
+          return (
+            <Box key={`mini-${a.id}`} flexDirection="column" flexShrink={0} width={isTerminal ? w : undefined}>
+              {Svg ? (
+                <Svg source={svgOf(grid, MW, PX_MINI)} alt={`${short} subagent`} width={MW * PX_MINI} height={MH * PX_MINI} />
+              ) : (
+                miniRows.map((runs, i) => (
+                  <Text key={`m-${i}`} wrap="truncate">
+                    {runs.map((run, j) => (
+                      <Text key={`c-${j}`} color={run.color} backgroundColor={run.bg}>
+                        {run.text}
+                      </Text>
+                    ))}
                   </Text>
-                ))}
+                ))
+              )}
+              <Text dimColor wrap="truncate-end">
+                {short}
               </Text>
-            ))
-          )}
-          <Text dimColor wrap="truncate-end">
-            {name}
-          </Text>
-        </Box>
-      )
-    })
+            </Box>
+          )
+        })}
+      </Box>
+    ))
 
-    // Alt ajan varken sağ sütun sprite yüksekliğini (7 satır) aşmasın diye ipucu metni
-    // atlanır, Hide düğmesi başlık satırına alınır
-    const right =
-      shown.length > 0 ? (
-        <Box flexDirection="column" flexShrink={1}>
-          <Box gap={2}>
-            <Box flexShrink={1}>{header}</Box>
-            {ctxBar ? <Box flexShrink={0}>{ctxBar}</Box> : null}
-            <Box flexShrink={0}>{hideButton}</Box>
+    // Hide sağ üst köşede, Random sağ alt köşede. Alt ajan yokken alt satırın soluna komut ipucu
+    // gelir; alt ajan varken sprite'larla birlikte sağ sütun sprite yüksekliğini aşmasın diye atlanır.
+    // Bant dar ise (tight) Random alt satır yerine üstte Hide'ın yanına alınır.
+    const showHint = lines.length === 0 && rightW >= 34
+    const right = (
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="space-between">
+        <Box gap={2} justifyContent="space-between">
+          <Box flexShrink={1}>{header}</Box>
+          <Box gap={2} flexShrink={0}>
+            {ctxBar}
+            {tight ? randomButton : null}
+            {hideButton}
           </Box>
-          <Box>{minis}</Box>
         </Box>
-      ) : (
-        <Box flexDirection="column" flexShrink={1}>
-          <Box gap={2}>
-            <Box flexShrink={1}>{header}</Box>
-            {ctxBar ? <Box flexShrink={0}>{ctxBar}</Box> : null}
-          </Box>
-          <Box gap={2}>
-            {rightW >= 30 ? (
+        {lines.length > 0 ? <Box flexDirection="column">{minis}</Box> : null}
+        {tight ? null : (
+          <Box gap={2} justifyContent={showHint ? 'space-between' : 'flex-end'}>
+            {showHint ? (
               <Box flexShrink={1}>
                 <Text dimColor wrap="truncate-end">
-                  /pixel-agent next
+                  /pixel-agent random
                 </Text>
               </Box>
             ) : null}
-            <Box flexShrink={0}>{hideButton}</Box>
+            <Box flexShrink={0}>{randomButton}</Box>
           </Box>
-        </Box>
-      )
+        )}
+      </Box>
+    )
 
     const rule = '─'.repeat(Math.min(columns, 100))
 
     return (
       <Box flexDirection="column" marginTop={framed ? 1 : 0}>
-        <Box gap={2} alignItems="center">
+        {/* Varsayılan stretch: sağ sütun sprite yüksekliğine uzar; Hide üstte, Random altta kalır */}
+        <Box gap={2}>
           {/* Sprite sütunu sabit genişlikte; küçülürse satırlar sarılıp sprite kayar */}
           <Box flexDirection="column" flexShrink={0} width={Svg ? undefined : cw}>
             {Svg ? (

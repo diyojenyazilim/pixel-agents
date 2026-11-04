@@ -51,7 +51,7 @@ Check which version you have with `claude plugin list`. If it does not change, y
 - **It reacts to Claude.** Ready, working, done, tool failed, each with its own face and motion.
 - **It idles like a living thing.** Blinks, looks around, strolls to the side and back, yawns, and goes to sleep after a couple of minutes.
 - **It picks up a prop for the tool at hand.** A book for `Read`, a notepad for `Edit` and `Write`, a terminal for `Bash`, a magnifier for `Grep` and `Glob`, a globe for web tools.
-- **Subagents get companions.** Each one walks in beside the main character, works, celebrates or flinches when it ends, and walks out. The same agent type always gets the same character.
+- **Subagents get companions.** Each one walks in beside the main character, works, celebrates or flinches when it ends, and walks out. The same agent type always gets the same character. Each companion shows its full agent name (for example `general-purpose`), and they line up side by side and wrap onto the next row when they do not fit.
 - **A context meter.** `ctx` shows how full the context window is. Past 85% the character looks tired.
 - **Five characters, six color themes.** Your choice is remembered between sessions.
 
@@ -60,13 +60,13 @@ Check which version you have with `claude plugin list`. If it does not change, y
 | Command | Does |
 | --- | --- |
 | `/pixel-agent` | Hide or show the agent |
-| `/pixel-agent next` | Switch to the next character |
+| `/pixel-agent random` | Switch to a random character |
 | `/pixel-agent <name>` | `bit`, `ghost`, `astronaut`, `wizard` or `cloud` |
 | `/pixel-agent list` | List the characters |
 | `/pixel-agent theme next` | Switch to the next color theme |
 | `/pixel-agent theme <name>` | `classic`, `mono`, `ember`, `forest`, `ocean` or `rose` |
 
-The band also has a **Hide** button.
+The band has two buttons: **Hide** in the top-right corner and **Random** in the bottom-right corner, which switches to a random character.
 
 <div align="center">
   <img src="assets/themes.svg" alt="The Code Wizard in six color themes" width="640" />
