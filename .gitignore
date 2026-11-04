@@ -4,3 +4,6 @@ Thumbs.db
 *.log
 .serena/
 .claude/
+
+# Geliştirici notları: public repoda yayınlanmaz
+DEVELOPMENT.md
