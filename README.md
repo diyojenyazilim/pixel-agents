@@ -8,17 +8,23 @@ Mods need Claude Code v2.1.287 or later.
 
 ```bash
 claude plugin marketplace add diyojenyazilim/pixel-agent
-claude plugin install pixel-agent@pixel-agents
+claude plugin install pixel-agent@diyojenyazilim
 ```
 
 Or inside a session:
 
 ```text
 /plugin marketplace add diyojenyazilim/pixel-agent
-/plugin install pixel-agent@pixel-agents
+/plugin install pixel-agent@diyojenyazilim
 ```
 
 If you install while a session is open, run `/reload-plugins` in it or start a new session.
+
+To get a newer version later:
+
+```bash
+claude plugin marketplace update diyojenyazilim
+```
 
 ## What it shows
 

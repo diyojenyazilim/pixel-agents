@@ -6,10 +6,10 @@ A Claude Code mod that puts a small pixel-art agent above your prompt. It reacts
 
 ```bash
 claude plugin marketplace add diyojenyazilim/pixel-agent
-claude plugin install pixel-agent@pixel-agents
+claude plugin install pixel-agent@diyojenyazilim
 ```
 
-Or inside a session: `/plugin install pixel-agent@pixel-agents`. Start a new session, or run `/reload-plugins`, to load it.
+Or inside a session: `/plugin install pixel-agent@diyojenyazilim`. Start a new session, or run `/reload-plugins`, to load it.
 
 ## What it shows
 
