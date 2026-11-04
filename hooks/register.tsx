@@ -737,6 +737,34 @@ function modeOf(status: string): Mode {
 }
 // ---SPRITE-END---
 
+// VS Code ve masaüstü yüzeyleri terminal değil, tarayıcı ağıdır: yarım blok karakterler
+// fonta ve satır yüksekliğine göre satır arası boşluk bırakır, hücre genişliği tutmaz;
+// sprite kayar. Bu yüzeylerde piksel ızgarası SVG olarak çizilir (font/satır yüksekliğinden
+// bağımsız, tam piksel hizalı). Yatayda aynı renkli pikseller tek <rect> olur.
+const PX_MAIN = 5
+const PX_MINI = 4
+
+function svgOf(canvas: Px[][], w: number, scale: number): string {
+  const rects: string[] = []
+
+  canvas.forEach((row, y) => {
+    let x = 0
+    while (x < w) {
+      const c = row[x]
+      if (!c) {
+        x += 1
+        continue
+      }
+      let end = x + 1
+      while (end < w && row[end] === c) end += 1
+      rects.push(`<rect x="${x}" y="${y}" width="${end - x}" height="1" fill="${c}"/>`)
+      x = end
+    }
+  })
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${canvas.length}" width="${w * scale}" height="${canvas.length * scale}" shape-rendering="crispEdges">${rects.join('')}</svg>`
+}
+
 const STATUS: Record<Mode, string> = {
   idle: 'ready',
   work: 'working',
@@ -988,9 +1016,14 @@ export const register: Register = on => {
     }
 
     const columns = e.props.bodyColumns ?? 100
+
+    // Sprite'ın kendi genişliğine bile sığmıyorsa çizme; sığmayan satır sarılıp kayardı
+    if (columns < W_NARROW) return next(e)
+
     // Çerçeve (boşluk + zemin çizgisi) için yer yoksa yalnız sprite çizilir
     const framed = maxRows === undefined || maxRows >= FRAMED_ROWS
     const cw = columns >= WIDE_MIN_COLUMNS ? W_WIDE : W_NARROW
+    const isTerminal = e.surface === 'terminal'
 
     const m = await read($, mode)
     const f = await read($, frame)
@@ -1001,6 +1034,8 @@ export const register: Register = on => {
     const spec = themed(pick(await read($, character)), themeId)
     const pct = await read($, ctx)
     const { Box, Button, Text } = $.ui.resolve(e)
+    // Terminal tablosunda Svg yok; VS Code / masaüstü / mobilde var
+    const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve(e).Svg
 
     const canvas = compose(spec, m, f, { cw, idleTicks, tool, tired: pct >= CTX_TIRED })
     const rows = Array.from({ length: ROWS }, (_, i) =>
@@ -1020,8 +1055,11 @@ export const register: Register = on => {
         ? ` · subagents ${busy} running / ${roster.length} total${hidden > 0 ? ` (+${hidden} hidden)` : ''}`
         : ''
 
+    // Sağ sütun sprite'tan kalan genişliktir; metinler sığmazsa sarılmaz, kesilir
+    const rightW = Math.max(10, columns - cw - 2)
+
     const header = (
-      <Text>
+      <Text wrap="truncate-end">
         {spec.title} <Text dimColor>· {base}{crew}</Text>
       </Text>
     )
@@ -1031,8 +1069,8 @@ export const register: Register = on => {
     const cells = columns >= 90 ? 10 : 6
     const filled = Math.round((Math.min(100, pct) / 100) * cells)
     const ctxBar =
-      pct >= 0 ? (
-        <Text color={pct >= CTX_TIRED ? RED : pct >= CTX_WARN ? AMBER : undefined} dimColor={pct < CTX_WARN}>
+      pct >= 0 && rightW >= 44 ? (
+        <Text wrap="truncate-end" color={pct >= CTX_TIRED ? RED : pct >= CTX_WARN ? AMBER : undefined} dimColor={pct < CTX_WARN}>
           ctx {'█'.repeat(filled)}
           {'░'.repeat(cells - filled)} {pct}%
         </Text>
@@ -1046,21 +1084,28 @@ export const register: Register = on => {
       const miniRows = Array.from({ length: MH / 2 }, (_, i) =>
         rowRuns(grid[i * 2] ?? [], grid[i * 2 + 1] ?? [], MW),
       )
-      // Eklenti önekini at, sütun hizası bozulmasın diye sabit genişliğe tamamla
-      const name = (a.type.split(':').pop() ?? a.type).slice(0, MW - 1).padEnd(MW)
+      // Eklenti önekini at; terminalde sütun hizası bozulmasın diye sabit genişliğe tamamla
+      const short = (a.type.split(':').pop() ?? a.type).slice(0, MW - 1)
+      const name = isTerminal ? short.padEnd(MW) : short
 
       return (
-        <Box key={`mini-${a.id}`} flexDirection="column">
-          {miniRows.map((runs, i) => (
-            <Text key={`m-${i}`}>
-              {runs.map((run, j) => (
-                <Text key={`c-${j}`} color={run.color} backgroundColor={run.bg}>
-                  {run.text}
-                </Text>
-              ))}
-            </Text>
-          ))}
-          <Text dimColor>{name}</Text>
+        <Box key={`mini-${a.id}`} flexDirection="column" flexShrink={0}>
+          {Svg ? (
+            <Svg source={svgOf(grid, MW, PX_MINI)} alt={`${short} subagent`} width={MW * PX_MINI} height={MH * PX_MINI} />
+          ) : (
+            miniRows.map((runs, i) => (
+              <Text key={`m-${i}`} wrap="truncate">
+                {runs.map((run, j) => (
+                  <Text key={`c-${j}`} color={run.color} backgroundColor={run.bg}>
+                    {run.text}
+                  </Text>
+                ))}
+              </Text>
+            ))
+          )}
+          <Text dimColor wrap="truncate-end">
+            {name}
+          </Text>
         </Box>
       )
     })
@@ -1069,46 +1114,57 @@ export const register: Register = on => {
     // atlanır, Hide düğmesi başlık satırına alınır
     const right =
       shown.length > 0 ? (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={1}>
           <Box gap={2}>
-            {header}
-            {ctxBar}
-            {hideButton}
+            <Box flexShrink={1}>{header}</Box>
+            {ctxBar ? <Box flexShrink={0}>{ctxBar}</Box> : null}
+            <Box flexShrink={0}>{hideButton}</Box>
           </Box>
           <Box>{minis}</Box>
         </Box>
       ) : (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={1}>
           <Box gap={2}>
-            {header}
-            {ctxBar}
+            <Box flexShrink={1}>{header}</Box>
+            {ctxBar ? <Box flexShrink={0}>{ctxBar}</Box> : null}
           </Box>
           <Box gap={2}>
-            <Text dimColor>/pixel-agent next</Text>
-            {hideButton}
+            {rightW >= 30 ? (
+              <Box flexShrink={1}>
+                <Text dimColor wrap="truncate-end">
+                  /pixel-agent next
+                </Text>
+              </Box>
+            ) : null}
+            <Box flexShrink={0}>{hideButton}</Box>
           </Box>
         </Box>
       )
 
-    const rule = '─'.repeat(Math.max(10, Math.min(columns, 100)))
+    const rule = '─'.repeat(Math.min(columns, 100))
 
     return (
       <Box flexDirection="column" marginTop={framed ? 1 : 0}>
         <Box gap={2} alignItems="center">
-          <Box flexDirection="column">
-            {rows.map((runs, i) => (
-              <Text key={`satir-${i}`}>
-                {runs.map((run, j) => (
-                  <Text key={`hucre-${j}`} color={run.color} backgroundColor={run.bg}>
-                    {run.text}
-                  </Text>
-                ))}
-              </Text>
-            ))}
+          {/* Sprite sütunu sabit genişlikte; küçülürse satırlar sarılıp sprite kayar */}
+          <Box flexDirection="column" flexShrink={0} width={Svg ? undefined : cw}>
+            {Svg ? (
+              <Svg source={svgOf(canvas, cw, PX_MAIN)} alt={`${spec.title} pixel agent, ${base}`} width={cw * PX_MAIN} height={H * PX_MAIN} />
+            ) : (
+              rows.map((runs, i) => (
+                <Text key={`satir-${i}`} wrap="truncate">
+                  {runs.map((run, j) => (
+                    <Text key={`hucre-${j}`} color={run.color} backgroundColor={run.bg}>
+                      {run.text}
+                    </Text>
+                  ))}
+                </Text>
+              ))
+            )}
           </Box>
           {right}
         </Box>
-        {framed ? <Text dimColor>{rule}</Text> : null}
+        {framed && isTerminal ? <Text dimColor wrap="truncate">{rule}</Text> : null}
       </Box>
     )
   })

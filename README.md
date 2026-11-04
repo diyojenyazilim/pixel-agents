@@ -62,10 +62,12 @@ The band also has a **Hide** button.
 ## Requirements
 
 - Claude Code v2.1.287 or later.
-- Drawn in the terminal and the Desktop app. In `claude -p`, the VS Code panel and cloud sessions the mod loads but draws nothing.
+- Drawn in the terminal, the Desktop app and the VS Code extension. In `claude -p` and cloud sessions the mod loads but draws nothing. The Desktop app and VS Code draw the sprite as an SVG image, so no font or terminal setting affects it there.
 - Needs 7 free rows. With fewer, the agent hides instead of drawing half a sprite. Walking and props need a band at least 76 columns wide.
 
 ## Troubleshooting
+
+**The sprite looks shifted, torn or has its rows staggered.** Update the mod (`claude plugin marketplace update diyojenyazilim`, then `/reload-plugins`). Older versions let a narrow window squeeze the sprite column so its rows wrapped. If it still happens in the terminal, widen the window to at least 40 columns.
 
 A thin line between the rows of the sprite means your terminal is not drawing block characters edge to edge.
 
