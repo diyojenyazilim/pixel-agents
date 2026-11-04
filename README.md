@@ -89,21 +89,15 @@ A thin line between the rows of the sprite means your terminal is not drawing bl
 
 ## What the mod touches
 
-A mod is code that runs with your permissions, so here is everything it uses:
+A mod is code that runs with your permissions, so here is everything it does:
 
-- `$.clock` timers, to animate
-- `$.agent.list()`, to read subagent statuses
-- `$.session` measurements, to read context usage
-- `$.command.register`, for `/pixel-agent`
-- `$.store`, to remember your character and theme
-- `$.state` and `$.ui`, to draw
+- Runs timers to animate the sprite
+- Reads subagent statuses and how full your context is
+- Registers the `/pixel-agent` command
+- Remembers your character and theme between sessions
+- Draws the band above your prompt
 
-It reads no files, starts no processes and makes no network requests. Its `prompt.submit` and `tool.call` hooks pass the event through if the mod ever fails, so a bug here cannot block a prompt or a tool call. You can check it yourself:
-
-```bash
-git clone https://github.com/diyojenyazilim/pixel-agents.git
-claude plugin validate ./pixel-agents
-```
+It reads no files, starts no processes and makes no network requests. If the mod ever fails, your prompts and tool calls still go through. The whole source is `hooks/register.tsx` in this repository if you want to read it.
 
 ## License
 
