@@ -1834,6 +1834,23 @@ function iconCanvas(kind: IconKind, f: number): Px[][] {
 
 const iconSvg = (kind: IconKind, f: number): string => svgOf(iconCanvas(kind, f), ICON, ICON_SCALE)
 
+// Terminalde SVG yok: durum yazı yerine tek hücrelik simge (çalışırken üç nokta döner)
+const TERM_ICONS: Record<Exclude<IconKind, 'work'>, { glyph: string; color: string }> = {
+  ready: { glyph: '○', color: ICON_DIM },
+  sleep: { glyph: '☾', color: ICON_MOON },
+  wait: { glyph: '⧖', color: ICON_DIM },
+  ok: { glyph: '✓', color: ICON_GREEN },
+  err: { glyph: '✗', color: RED },
+}
+
+function termIcon(kind: IconKind, f: number): Array<{ glyph: string; color: string }> {
+  if (kind === 'work') {
+    return [0, 1, 2].map(i => ({ glyph: '●', color: i === f % 3 ? AMBER : '#4A4440' }))
+  }
+
+  return [TERM_ICONS[kind]]
+}
+
 // SVG yüzeylerinde ana karakterin üstündeki ad ve konuşma balonu da yazı değil SVG etiket.
 // Yazı genişliği textLength ile sabitlenir; font farkı etiketi taşırmaz, ölçü tahminidir.
 const LABEL_FONT = 11
@@ -1970,18 +1987,6 @@ async function statsText($: StatDollar): Promise<string> {
   return `Session: ${plural(t.turns, 'turn')}, ${plural(t.tools, 'tool call')}, ${plural(t.errors, 'error')}, ${fmtClock(t.workMs / 1000)} working.\nTop tools: ${top || 'none yet'}.`
 }
 
-// Başlıktaki durum metni: çalışırken "working · Bash · mm:ss · N tools", uzun turdan sonra "done in mm:ss"
-function statLine(base: string, m: Mode, f: number, turn: StatTurn, doneSec: number): string {
-  if (m === 'ok' && doneSec >= 0) return `done in ${fmtClock(doneSec)}`
-
-  if ((m === 'work' || m === 'err') && turn.startFrame >= 0) {
-    const ticks = (f - turn.startFrame + FRAME_WRAP) % FRAME_WRAP
-
-    return `${base} · ${fmtClock((ticks * TICK_MS) / 1000)} · ${plural(turn.tools, 'tool')}`
-  }
-
-  return base
-}
 // ---İSTATİSTİK-END---
 
 // Alt komutlar: yazım satırı önerileri ve /pixel-agent help buradan beslenir
@@ -2009,6 +2014,26 @@ const TIPS = [
   '/pixel-agent help · all commands',
 ]
 const TIP_MS = 10000
+
+// Komut adından sonra dim görünen ipucu; alt komut yazılıp boşluk bırakılınca onun parametrelerine döner
+const ROOT_HINT = '[switch | random | hat | theme | bond | stats | chatter | help | <character>]'
+
+const SUB_HINTS: Record<string, string> = {
+  theme: `[${[...THEME_ORDER, 'next', 'auto'].join(' | ')}]`,
+  hat: `[none | ${HAT_ORDER.join(' | ')}]`,
+  chatter: '[on | off]',
+}
+
+// prompt.autocomplete boş kelimede tetiklenmediği için (token hiç boş olmaz) boşluk sonrası ipucu
+// yalnızca argumentHint ile verilebilir; yazım kutusu her değiştiğinde buradan hesaplanır
+function hintFor(text: string): string {
+  const m = /^\/(?:pixel-agent:)?pixel-agent\s+(\S+)\s+\S*$/.exec(text)
+
+  return (m?.[1] && SUB_HINTS[m[1].toLowerCase()]) || ROOT_HINT
+}
+
+// command.describe önbellekli olduğundan geçerli ipucu burada tutulur; atom değil, çünkü bantı yeniden çizmesin
+let liveHint = ROOT_HINT
 
 type Suggest = { text: string; description: string }
 
@@ -2231,7 +2256,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'pixel-agent',
-      argumentHint: '[switch | random | hat | theme | bond | stats | chatter | help | <character>]',
+      argumentHint: ROOT_HINT,
       description:
         'Show or hide the pixel agent, change the character (switch opens a list, random, list, or a name like cat, fox, wizard) or the color theme (theme <name|next|auto>, auto follows the time of day), session stats (stats), or the speech bubble (chatter on|off), the bond (bond), or a hat (hat opens a list, hat <name|none>)',
     })
@@ -2523,6 +2548,34 @@ export const register: Register = on => {
     return { suggestions: [...base.suggestions, ...suggestFor(words[1], e.token.toLowerCase())] }
   }).catch(($, e, next) => next(e)) // öneri hatası yazım kutusunu bozmasın
 
+  // Yazım kutusu değişince argumentHint'i alt komuta göre güncelle (theme + boşluk → tema adları)
+  const syncHint = ($: Parameters<typeof read>[0] & { ui: { invalidate: (event: 'command.describe') => void } }, text: string) => {
+    const hint = hintFor(text)
+
+    if (hint === liveHint) return
+
+    liveHint = hint
+    $.ui.invalidate('command.describe')
+  }
+
+  on('prompt.edit', async ($, e, next) => {
+    const box = await next(e)
+    syncHint($, box.text)
+
+    return box
+  }).catch(($, e, next) => next(e))
+
+  // Geçmişten çağırma, temizleme ve gönderim sonrası kutu boşalması
+  on('prompt.change', async ($, e, next) => {
+    syncHint($, e.text)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('command.describe', { command: 'pixel-agent' }, async ($, e, next) => next({ ...e, argumentHint: liveHint })).catch(
+    ($, e, next) => next(e),
+  )
+
   on('prompt.submit', async ($, e, next) => {
     await update($, mode, () => 'work')
     await update($, label, () => '')
@@ -2625,7 +2678,6 @@ export const register: Register = on => {
     const bondNote = await read($, bondWelcome)
     const isHatPicking = await read($, bondHatPicking)
     // ---BAĞ-END---
-    const statTurnNow = await read($, statTurn) // İSTATİSTİK
     const statDoneSec = await read($, statDone) // İSTATİSTİK
     const canvas = compose(spec, m, f, { cw, idleTicks, tool, tired: pct >= CTX_TIRED, hat: bondHat,long: m === 'ok' && statDoneSec >= 0 })
     const rows = Array.from({ length: ROWS }, (_, i) =>
@@ -2720,18 +2772,32 @@ export const register: Register = on => {
 
     // SVG yüzeylerinde ad, durum ve balon ana karakterin üstündeki etiketlerde; sağ üstte süre,
     // araç sayısı veya ad yazılmaz (yalnız varsa karşılama notu). Terminalde başlık yazıyla kalır.
-    const header = Svg ? (
-      bondNote ? (
-        <Text dimColor wrap="truncate-end">
-          {bondNote}
-        </Text>
-      ) : null
-    ) : (
-      <Text wrap="truncate-end">
-        {spec.title}
-        <Text dimColor>{` · ${[statLine(base, m, f, statTurnNow, statDoneSec), bondNote].filter(Boolean).join(' · ')}`}</Text>
+    // Terminalde de ad sprite'ın üstündeki satırda, durum simge olarak; yer yoksa (framed değil)
+    // ad ve simge başlıkta kalır. Durum yazısı ("ready", "working") hiçbir yüzeyde yazılmaz.
+    const nameAbove = isTerminal && framed
+    const termIconEl = (
+      <Text>
+        {termIcon(mainKind, f).map((s, i) => (
+          <Text key={`simge-${i}`} color={s.color}>
+            {s.glyph}
+          </Text>
+        ))}
       </Text>
     )
+    const header =
+      Svg || nameAbove ? (
+        bondNote ? (
+          <Text dimColor wrap="truncate-end">
+            {bondNote}
+          </Text>
+        ) : null
+      ) : (
+        <Text wrap="truncate-end">
+          {`${spec.title} `}
+          {termIconEl}
+          {bondNote ? <Text dimColor>{` · ${bondNote}`}</Text> : null}
+        </Text>
+      )
 
     const hideButton = <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
     const randomButton = (
@@ -2921,12 +2987,19 @@ export const register: Register = on => {
     const rule = '─'.repeat(Math.min(columns, 100))
 
     return (
-      <Box flexDirection="column" marginTop={framed ? topGap : 0}>
+      <Box flexDirection="column" marginTop={framed ? (nameAbove ? topGap - 1 : topGap) : 0}>
         {/* Varsayılan stretch: sağ sütun sprite yüksekliğine uzar; Hide üstte, Random altta kalır */}
         <Box gap={2}>
           {/* Sprite sütunu sabit genişlikte; küçülürse satırlar sarılıp sprite kayar. SVG
               yüzeylerinde durum ikonu sprite'ın üstünde ortalanır */}
           <Box flexDirection="column" flexShrink={0} alignItems="center" width={Svg ? undefined : cw}>
+            {/* Terminalde üstteki boş satır yerine ad + durum simgesi */}
+            {nameAbove ? (
+              <Text key="ad" wrap="truncate">
+                <Text bold>{`${spec.title} `}</Text>
+                {termIconEl}
+              </Text>
+            ) : null}
             {Svg ? (
               <Box flexDirection="column" alignItems="center">
                 {nameTag ? <Svg source={nameTag.svg} alt={spec.title} width={nameTag.w} height={nameTag.h} /> : null}
