@@ -43,18 +43,18 @@ Claude Code'u yeniden başlat ya da açık oturumda `/reload-plugins` çalışt�
 
 | Komut | Ne yapar |
 | --- | --- |
-| `/pixel-agent` | Ajanı gizler veya gösterir |
-| `/pixel-agent switch` | Karakteri ızgaradan seçersin |
-| `/pixel-agent random` | Rastgele bir karaktere geçer |
-| `/pixel-agent <ad>` | `bit`, `ghost`, `astronaut`, `wizard`, `cloud`, `cat`, `fox`, `frog`, `penguin`, `owl`, `panda`, `bunny`, `dragon`, `pumpkin`, `alien`, `slime`, `mushroom`, `knight`, `octopus`, `cactus` |
-| `/pixel-agent hat` | Şapka seçersin. Şapkalar bağ turuyla açılır: 10, 25, 50, 100, 200, 400 |
-| `/pixel-agent bond` | Bağ turu sayısı ve sıradaki şapka |
-| `/pixel-agent theme <ad>` | `classic`, `mono`, `ember`, `forest`, `ocean`, `rose` (ayrıca `next` ve `auto`) |
-| `/pixel-agent chatter` | Konuşma balonunu açar veya kapatır (ayrıca `on` ve `off`) |
-| `/pixel-agent stats` | Oturum özeti |
-| `/pixel-agent help` | Tüm komutlar |
+| `/pixel-agents` | Ajanı gizler veya gösterir |
+| `/pixel-agents switch` | Karakteri ızgaradan seçersin |
+| `/pixel-agents random` | Rastgele bir karaktere geçer |
+| `/pixel-agents <ad>` | `bit`, `ghost`, `astronaut`, `wizard`, `cloud`, `cat`, `fox`, `frog`, `penguin`, `owl`, `panda`, `bunny`, `dragon`, `pumpkin`, `alien`, `slime`, `mushroom`, `knight`, `octopus`, `cactus` |
+| `/pixel-agents hat` | Şapka seçersin. Şapkalar bağ turuyla açılır: 10, 25, 50, 100, 200, 400 |
+| `/pixel-agents bond` | Bağ turu sayısı ve sıradaki şapka |
+| `/pixel-agents theme <ad>` | `classic`, `mono`, `ember`, `forest`, `ocean`, `rose` (ayrıca `next` ve `auto`) |
+| `/pixel-agents chatter` | Konuşma balonunu açar veya kapatır (ayrıca `on` ve `off`) |
+| `/pixel-agents stats` | Oturum özeti |
+| `/pixel-agents help` | Tüm komutlar |
 
-`/pixel-agent ` yazınca seçenekler yazdıkça listelenir. Bantta **Hide** (sağ üst), **Random** (sağ alt) ve alt ajanlar ikinci satıra ihtiyaç duyunca **Expand** / **Collapse** düğmeleri bulunur.
+`/pixel-agents ` yazınca seçenekler yazdıkça listelenir. Bantta **Hide** (sağ üst), **Random** (sağ alt) ve alt ajanlar ikinci satıra ihtiyaç duyunca **Expand** / **Collapse** düğmeleri bulunur.
 
 <div align="center">
   <img src="assets/states.svg" alt="Hazır, kitapla çalışıyor, bitti, araç hatası ve uyuyor" width="720" />

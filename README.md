@@ -43,18 +43,18 @@ Restart Claude Code, or run `/reload-plugins` in an open session. The VS Code ex
 
 | Command | Does |
 | --- | --- |
-| `/pixel-agent` | Hide or show the agent |
-| `/pixel-agent switch` | Pick a character from a grid |
-| `/pixel-agent random` | Switch to a random character |
-| `/pixel-agent <name>` | `bit`, `ghost`, `astronaut`, `wizard`, `cloud`, `cat`, `fox`, `frog`, `penguin`, `owl`, `panda`, `bunny`, `dragon`, `pumpkin`, `alien`, `slime`, `mushroom`, `knight`, `octopus`, `cactus` |
-| `/pixel-agent hat` | Pick a hat. Hats unlock with bond turns: 10, 25, 50, 100, 200, 400 |
-| `/pixel-agent bond` | Bond turns and the next hat |
-| `/pixel-agent theme <name>` | `classic`, `mono`, `ember`, `forest`, `ocean`, `rose` (also `next` and `auto`) |
-| `/pixel-agent chatter` | Toggle the speech bubble (also `on` and `off`) |
-| `/pixel-agent stats` | Session summary |
-| `/pixel-agent help` | All commands |
+| `/pixel-agents` | Hide or show the agent |
+| `/pixel-agents switch` | Pick a character from a grid |
+| `/pixel-agents random` | Switch to a random character |
+| `/pixel-agents <name>` | `bit`, `ghost`, `astronaut`, `wizard`, `cloud`, `cat`, `fox`, `frog`, `penguin`, `owl`, `panda`, `bunny`, `dragon`, `pumpkin`, `alien`, `slime`, `mushroom`, `knight`, `octopus`, `cactus` |
+| `/pixel-agents hat` | Pick a hat. Hats unlock with bond turns: 10, 25, 50, 100, 200, 400 |
+| `/pixel-agents bond` | Bond turns and the next hat |
+| `/pixel-agents theme <name>` | `classic`, `mono`, `ember`, `forest`, `ocean`, `rose` (also `next` and `auto`) |
+| `/pixel-agents chatter` | Toggle the speech bubble (also `on` and `off`) |
+| `/pixel-agents stats` | Session summary |
+| `/pixel-agents help` | All commands |
 
-Type `/pixel-agent ` and the options appear as you type. The band has **Hide** (top right), **Random** (bottom right) and, when subagents need a second row, **Expand** / **Collapse**.
+Type `/pixel-agents ` and the options appear as you type. The band has **Hide** (top right), **Random** (bottom right) and, when subagents need a second row, **Expand** / **Collapse**.
 
 <div align="center">
   <img src="assets/states.svg" alt="Ready, working with a book, done, tool failed and sleeping" width="720" />

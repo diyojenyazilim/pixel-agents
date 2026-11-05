@@ -3,19 +3,19 @@ import type { Register } from 'claude-code'
 
 import type { AgentRow, Mode } from '../types'
 
-const mode = atom({ plugin: 'pixel-agent', key: 'mode' } as const, 'idle' as Mode)
-const frame = atom({ plugin: 'pixel-agent', key: 'frame' } as const, 0)
-const label = atom({ plugin: 'pixel-agent', key: 'label' } as const, '')
-const isHidden = atom({ plugin: 'pixel-agent', key: 'isHidden' } as const, false)
-const character = atom({ plugin: 'pixel-agent', key: 'character' } as const, 'bit')
-const agents = atom({ plugin: 'pixel-agent', key: 'agents' } as const, [] as AgentRow[])
+const mode = atom({ plugin: 'pixel-agents', key: 'mode' } as const, 'idle' as Mode)
+const frame = atom({ plugin: 'pixel-agents', key: 'frame' } as const, 0)
+const label = atom({ plugin: 'pixel-agents', key: 'label' } as const, '')
+const isHidden = atom({ plugin: 'pixel-agents', key: 'isHidden' } as const, false)
+const character = atom({ plugin: 'pixel-agents', key: 'character' } as const, 'bit')
+const agents = atom({ plugin: 'pixel-agents', key: 'agents' } as const, [] as AgentRow[])
 // Boşta kalmanın başladığı kare (-1: boşta değil). Her karede sayaç yazmamak için
 // yalnız geçişte yazılır; boşta süresi frame farkından hesaplanır.
-const idleStart = atom({ plugin: 'pixel-agent', key: 'idleStart' } as const, -1)
-const theme = atom({ plugin: 'pixel-agent', key: 'theme' } as const, 'classic')
+const idleStart = atom({ plugin: 'pixel-agents', key: 'idleStart' } as const, -1)
+const theme = atom({ plugin: 'pixel-agents', key: 'theme' } as const, 'classic')
 // ---HAREKET-START---
 // `theme auto` açık mı; theme atomuna 'auto' yazılmaz, tema saate göre bu bayrakla seçilir
-const themeAuto = atom({ plugin: 'pixel-agent', key: 'themeAuto' } as const, false)
+const themeAuto = atom({ plugin: 'pixel-agents', key: 'themeAuto' } as const, false)
 // Saat (yerel) -> tema: sabah ocean, gün classic, akşam ember, gece mono
 function autoThemeFor(hour: number): string {
   if (hour >= 6 && hour < 11) return 'ocean'
@@ -25,30 +25,30 @@ function autoThemeFor(hour: number): string {
   return 'mono'
 }
 // ---HAREKET-END---
-const ctx = atom({ plugin: 'pixel-agent', key: 'ctx' } as const, -1)
-// /pixel-agent switch ile açılan karakter ızgarası görünüyor mu
-const picking = atom({ plugin: 'pixel-agent', key: 'picking' } as const, false)
+const ctx = atom({ plugin: 'pixel-agents', key: 'ctx' } as const, -1)
+// /pixel-agents switch ile açılan karakter ızgarası görünüyor mu
+const picking = atom({ plugin: 'pixel-agents', key: 'picking' } as const, false)
 // Alt ajanlar iki satıra açık mı (false: tek satıra indirilmiş)
-const miniExpanded = atom({ plugin: 'pixel-agent', key: 'miniExpanded' } as const, true)
+const miniExpanded = atom({ plugin: 'pixel-agents', key: 'miniExpanded' } as const, true)
 // ---BAĞ-START--- (atomlar)
 // Karakter başına bağ puanı (başarılı tur sayısı) ve karakter başına seçili şapka
-const bondPoints = atom({ plugin: 'pixel-agent', key: 'bondPoints' } as const, {} as Record<string, number>)
-const bondHats = atom({ plugin: 'pixel-agent', key: 'bondHats' } as const, {} as Record<string, string>)
-// /pixel-agent hat ile açılan şapka listesi (Select) görünüyor mu
-const bondHatPicking = atom({ plugin: 'pixel-agent', key: 'bondHatPicking' } as const, false)
+const bondPoints = atom({ plugin: 'pixel-agents', key: 'bondPoints' } as const, {} as Record<string, number>)
+const bondHats = atom({ plugin: 'pixel-agents', key: 'bondHats' } as const, {} as Record<string, string>)
+// /pixel-agents hat ile açılan şapka listesi (Select) görünüyor mu
+const bondHatPicking = atom({ plugin: 'pixel-agents', key: 'bondHatPicking' } as const, false)
 // Uzun aradan sonra bantta kısa süre görünen karşılama metni ('' = yok)
-const bondWelcome = atom({ plugin: 'pixel-agent', key: 'bondWelcome' } as const, '')
+const bondWelcome = atom({ plugin: 'pixel-agents', key: 'bondWelcome' } as const, '')
 // ---BAĞ-END---
 
 // ---BALON-START---
 // Konuşma balonu: sabit tablodan tek satırlık tepki. Metin araç adının saf fonksiyonudur,
 // bu yüzden aynı araçta sabit kalır, araç değişince güncellenir.
 // Ardışık başarısız araç sayısı (başarıda ve yeni istekte sıfırlanır)
-const balonErrStreak = atom({ plugin: 'pixel-agent', key: 'balonErrStreak' } as const, 0)
+const balonErrStreak = atom({ plugin: 'pixel-agents', key: 'balonErrStreak' } as const, 0)
 // Biten tur sayısı; "bitti" varyasyonunu seçer ve tur boyunca sabit tutar
-const balonTurns = atom({ plugin: 'pixel-agent', key: 'balonTurns' } as const, 0)
-// /pixel-agent chatter ile açılıp kapanır; kalıcıdır
-const balonOn = atom({ plugin: 'pixel-agent', key: 'balonOn' } as const, true)
+const balonTurns = atom({ plugin: 'pixel-agents', key: 'balonTurns' } as const, 0)
+// /pixel-agents chatter ile açılıp kapanır; kalıcıdır
+const balonOn = atom({ plugin: 'pixel-agents', key: 'balonOn' } as const, true)
 
 // Bu kadar ardışık hatadan sonra "tekrar deneyelim" balonu çıkar
 const BALON_ERR_STREAK = 3
@@ -1905,7 +1905,7 @@ function bubbleLabel(icon: Px[][], text: string): Label {
 }
 
 // ---İSTATİSTİK-START---
-// Tur süresi / araç sayacı, uzun iş kutlaması ve /pixel-agent stats. Sayaçlar oturum
+// Tur süresi / araç sayacı, uzun iş kutlaması ve /pixel-agents stats. Sayaçlar oturum
 // ömürlüdür (kalıcı değil); session.start'ta sıfırlanır.
 type StatTurn = { startMs: number; startFrame: number; tools: number }
 type StatTotals = { turns: number; tools: number; errors: number; workMs: number; byTool: Record<string, number> }
@@ -1915,10 +1915,10 @@ const STAT_EMPTY: StatTotals = { turns: 0, tools: 0, errors: 0, workMs: 0, byToo
 
 // Çalışan turun başlangıcı (startFrame -1: tur yok). Süre render'da Date.now ile değil,
 // 450 ms'lik frame sayacı farkından hesaplanır (saf render)
-const statTurn = atom({ plugin: 'pixel-agent', key: 'statTurn' } as const, STAT_NO_TURN)
+const statTurn = atom({ plugin: 'pixel-agents', key: 'statTurn' } as const, STAT_NO_TURN)
 // Uzun biten turun süresi (sn); -1: son tur uzun değildi / tur sürüyor
-const statDone = atom({ plugin: 'pixel-agent', key: 'statDone' } as const, -1)
-const statTotals = atom({ plugin: 'pixel-agent', key: 'statTotals' } as const, STAT_EMPTY)
+const statDone = atom({ plugin: 'pixel-agents', key: 'statDone' } as const, -1)
+const statTotals = atom({ plugin: 'pixel-agents', key: 'statTotals' } as const, STAT_EMPTY)
 
 // Bu süre (sn) ve üstü süren tur "uzun iş" sayılır: ok modu daha uzun kalır, ekstra yıldız çıkar
 const LONG_TURN_SEC = 120
@@ -1989,7 +1989,7 @@ async function statsText($: StatDollar): Promise<string> {
 
 // ---İSTATİSTİK-END---
 
-// Alt komutlar: yazım satırı önerileri ve /pixel-agent help buradan beslenir
+// Alt komutlar: yazım satırı önerileri ve /pixel-agents help buradan beslenir
 const SUBCOMMANDS: Array<{ name: string; hint: string }> = [
   { name: 'switch', hint: 'Pick a character from a grid' },
   { name: 'random', hint: 'Switch to a random character' },
@@ -2004,14 +2004,14 @@ const SUBCOMMANDS: Array<{ name: string; hint: string }> = [
 
 // Bantta 10 saniyede bir değişen ipucu satırı; Random düğmesi zaten sağ altta olduğundan listede yok
 const TIPS = [
-  '/pixel-agent hat · try on a hat',
-  '/pixel-agent theme next · change the colors',
-  '/pixel-agent switch · pick a character',
-  '/pixel-agent bond · hats unlock as you work together',
-  '/pixel-agent theme auto · colors follow the time of day',
-  '/pixel-agent stats · session summary',
-  '/pixel-agent chatter off · hide the speech bubble',
-  '/pixel-agent help · all commands',
+  '/pixel-agents hat · try on a hat',
+  '/pixel-agents theme next · change the colors',
+  '/pixel-agents switch · pick a character',
+  '/pixel-agents bond · hats unlock as you work together',
+  '/pixel-agents theme auto · colors follow the time of day',
+  '/pixel-agents stats · session summary',
+  '/pixel-agents chatter off · hide the speech bubble',
+  '/pixel-agents help · all commands',
 ]
 const TIP_MS = 10000
 
@@ -2027,7 +2027,7 @@ const SUB_HINTS: Record<string, string> = {
 // prompt.autocomplete boş kelimede tetiklenmediği için (token hiç boş olmaz) boşluk sonrası ipucu
 // yalnızca argumentHint ile verilebilir; yazım kutusu her değiştiğinde buradan hesaplanır
 function hintFor(text: string): string {
-  const m = /^\/(?:pixel-agent:)?pixel-agent\s+(\S+)\s+\S*$/.exec(text)
+  const m = /^\/(?:pixel-agents:)?pixel-agents\s+(\S+)\s+\S*$/.exec(text)
 
   return (m?.[1] && SUB_HINTS[m[1].toLowerCase()]) || ROOT_HINT
 }
@@ -2035,9 +2035,20 @@ function hintFor(text: string): string {
 // command.describe önbellekli olduğundan geçerli ipucu burada tutulur; atom değil, çünkü bantı yeniden çizmesin
 let liveHint = ROOT_HINT
 
+// Yazım kutusu değişince argumentHint'i alt komuta göre güncelle (theme + boşluk → tema adları)
+// Motor $'ı yalnızca dosya üstündeki fonksiyonlara geçirebildiği için register dışında tanımlı
+function syncHint($: Parameters<typeof read>[0] & { ui: { invalidate: (event: 'command.describe') => void } }, text: string) {
+  const hint = hintFor(text)
+
+  if (hint === liveHint) return
+
+  liveHint = hint
+  $.ui.invalidate('command.describe')
+}
+
 type Suggest = { text: string; description: string }
 
-// /pixel-agent <token> ve /pixel-agent <alt komut> <token> için yazım satırı önerileri
+// /pixel-agents <token> ve /pixel-agents <alt komut> <token> için yazım satırı önerileri
 function suggestFor(sub: string | undefined, want: string): Suggest[] {
   let pool: Suggest[]
 
@@ -2070,13 +2081,13 @@ function suggestFor(sub: string | undefined, want: string): Suggest[] {
 }
 
 function helpText(): string {
-  const cmds = SUBCOMMANDS.map(s => `/pixel-agent ${s.name} · ${s.hint}`).join('\n')
+  const cmds = SUBCOMMANDS.map(s => `/pixel-agents ${s.name} · ${s.hint}`).join('\n')
   const hats = HAT_ORDER.map(h => `${HATS[h]?.title ?? h} ${HATS[h]?.need ?? 0}`).join(', ')
 
   return [
-    '/pixel-agent · hide or show the agent',
+    '/pixel-agents · hide or show the agent',
     cmds,
-    '/pixel-agent <character> · for example cat, fox, wizard',
+    '/pixel-agents <character> · for example cat, fox, wizard',
     `Hats unlock per character: every turn Claude finishes successfully with that character adds 1 bond turn (subagent turns, cancels and errors do not count). Bond turns needed: ${hats}.`,
   ].join('\n')
 }
@@ -2176,7 +2187,7 @@ async function bondTurnDone($: BondCtx): Promise<void> {
   const n = points[id] ?? 0
   const got = HAT_ORDER.find(h => HATS[h]?.need === n)
   if (got) {
-    $.ui.toast(`${pick(id).title} bond ${n}: new hat unlocked, ${HATS[got]?.title ?? got}. Try /pixel-agent hat`)
+    $.ui.toast(`${pick(id).title} bond ${n}: new hat unlocked, ${HATS[got]?.title ?? got}. Try /pixel-agents hat`)
   }
 }
 
@@ -2210,7 +2221,7 @@ async function bondChooseHat($: BondCtx, id: string, want: string): Promise<{ ok
   return { ok: true, text: `${name} wears the ${hat.title}.` }
 }
 
-// /pixel-agent hat ve /pixel-agent bond; başka komutsa undefined döner
+// /pixel-agents hat ve /pixel-agents bond; başka komutsa undefined döner
 async function bondCommand($: BondCtx, head: string, rest: string[]): Promise<{ text: string } | undefined> {
   if (head !== 'hat' && head !== 'bond') return undefined
 
@@ -2237,7 +2248,7 @@ async function bondCommand($: BondCtx, head: string, rest: string[]): Promise<{ 
 
     return {
       text: open
-        ? 'Hat list is open above the prompt: move with the arrow keys and press Enter. Locked hats show their bond turns. Run /pixel-agent hat again to close it.'
+        ? 'Hat list is open above the prompt: move with the arrow keys and press Enter. Locked hats show their bond turns. Run /pixel-agents hat again to close it.'
         : 'Hat list closed.',
     }
   }
@@ -2255,7 +2266,7 @@ async function bondCommand($: BondCtx, head: string, rest: string[]): Promise<{ 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'pixel-agent',
+      name: 'pixel-agents',
       argumentHint: ROOT_HINT,
       description:
         'Show or hide the pixel agent, change the character (switch opens a list, random, list, or a name like cat, fox, wizard) or the color theme (theme <name|next|auto>, auto follows the time of day), session stats (stats), or the speech bubble (chatter on|off), the bond (bond), or a hat (hat opens a list, hat <name|none>)',
@@ -2275,7 +2286,7 @@ export const register: Register = on => {
     }
 
     // ---BAĞ-START--- (karakter yukarıda geri yüklendikten sonra)
-    await bondRestore($).catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+    await bondRestore($).catch(err => $.ui.status(`pixel-agents: ${String(err)}`))
     // ---BAĞ-END---
 
     // ---HAREKET-START---
@@ -2414,14 +2425,14 @@ export const register: Register = on => {
         })
         .catch(err => {
           // Süs bir mod: hatayı durum satırında göster, oturumu bozma
-          $.ui.status(`pixel-agent: ${String(err)}`)
+          $.ui.status(`pixel-agents: ${String(err)}`)
         })
     })
 
     return next(e)
   })
 
-  on('command.run', { command: 'pixel-agent' }, async ($, e) => {
+  on('command.run', { command: 'pixel-agents' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     const list = ORDER.map(id => `${id} (${pick(id).title})`).join(', ')
     const [head = '', ...rest] = arg.split(/\s+/)
@@ -2431,7 +2442,7 @@ export const register: Register = on => {
       const want = rest[0] ?? ''
 
       if (want !== '' && want !== 'on' && want !== 'off') {
-        return { text: `Unknown option: ${want}. Use /pixel-agent chatter on, off, or no argument to toggle.` }
+        return { text: `Unknown option: ${want}. Use /pixel-agents chatter on, off, or no argument to toggle.` }
       }
 
       const enabled = want === '' ? !(await read($, balonOn)) : want === 'on'
@@ -2449,7 +2460,7 @@ export const register: Register = on => {
       if (want === '') {
         const auto = (await read($, themeAuto)) ? ' Auto is on.' : ''
 
-        return { text: `Themes: ${themes}. Pick one with /pixel-agent theme <name>, switch with /pixel-agent theme next, or follow the time of day with /pixel-agent theme auto.${auto}` }
+        return { text: `Themes: ${themes}. Pick one with /pixel-agents theme <name>, switch with /pixel-agents theme next, or follow the time of day with /pixel-agents theme auto.${auto}` }
       }
 
       // ---HAREKET-START---
@@ -2503,7 +2514,7 @@ export const register: Register = on => {
     }
 
     if (arg === 'list') {
-      return { text: `Characters: ${list}. Pick one with /pixel-agent <name>, from a list with /pixel-agent switch, or get a random one with /pixel-agent random.` }
+      return { text: `Characters: ${list}. Pick one with /pixel-agents <name>, from a list with /pixel-agents switch, or get a random one with /pixel-agents random.` }
     }
 
     // Karakter listesi bantta açılır; ikinci çağrı kapatır
@@ -2516,7 +2527,7 @@ export const register: Register = on => {
 
       return {
         text: open
-          ? 'Character list is open above the prompt: click a character (or move with Tab and press Enter). Run /pixel-agent switch again to close it.'
+          ? 'Character list is open above the prompt: click a character (or move with Tab and press Enter). Run /pixel-agents switch again to close it.'
           : 'Character list closed.',
       }
     }
@@ -2538,25 +2549,15 @@ export const register: Register = on => {
     return { text: `Character: ${pick(chosen).title}.` }
   })
 
-  // /pixel-agent yazılırken alt komutlar ve değerleri yazım satırında listelenir
+  // /pixel-agents yazılırken alt komutlar ve değerleri yazım satırında listelenir
   on('prompt.autocomplete', async ($, e, next) => {
     const base = await next(e)
     const words = e.text.slice(0, e.start).trim().split(/\s+/).filter(Boolean)
 
-    if (!/^\/(?:pixel-agent:)?pixel-agent$/.test(words[0] ?? '') || words.length > 2) return base
+    if (!/^\/(?:pixel-agents:)?pixel-agents$/.test(words[0] ?? '') || words.length > 2) return base
 
     return { suggestions: [...base.suggestions, ...suggestFor(words[1], e.token.toLowerCase())] }
   }).catch(($, e, next) => next(e)) // öneri hatası yazım kutusunu bozmasın
-
-  // Yazım kutusu değişince argumentHint'i alt komuta göre güncelle (theme + boşluk → tema adları)
-  const syncHint = ($: Parameters<typeof read>[0] & { ui: { invalidate: (event: 'command.describe') => void } }, text: string) => {
-    const hint = hintFor(text)
-
-    if (hint === liveHint) return
-
-    liveHint = hint
-    $.ui.invalidate('command.describe')
-  }
 
   on('prompt.edit', async ($, e, next) => {
     const box = await next(e)
@@ -2572,7 +2573,7 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('command.describe', { command: 'pixel-agent' }, async ($, e, next) => next({ ...e, argumentHint: liveHint })).catch(
+  on('command.describe', { command: 'pixel-agents' }, async ($, e, next) => next({ ...e, argumentHint: liveHint })).catch(
     ($, e, next) => next(e),
   )
 
@@ -2625,7 +2626,7 @@ export const register: Register = on => {
 
     // ---BAĞ-START---
     if (e.agentId === undefined && e.reason === 'answer') {
-      await bondTurnDone($).catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+      await bondTurnDone($).catch(err => $.ui.status(`pixel-agents: ${String(err)}`))
     }
     // ---BAĞ-END---
 
@@ -2949,7 +2950,7 @@ export const register: Register = on => {
                   await update($, character, () => id)
                   await update($, picking, () => false)
                   await $.store.set('character', id)
-                })().catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+                })().catch(err => $.ui.status(`pixel-agents: ${String(err)}`))
               }}
             />
           ))}
@@ -2978,7 +2979,7 @@ export const register: Register = on => {
             const res = await bondChooseHat($, characterId, choice)
             if (res.ok) await update($, bondHatPicking, () => false)
             else $.ui.toast(res.text)
-          })().catch(err => $.ui.status(`pixel-agent: ${String(err)}`))
+          })().catch(err => $.ui.status(`pixel-agents: ${String(err)}`))
         }}
       />
     ) : null

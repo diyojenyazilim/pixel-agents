@@ -13,7 +13,7 @@ export type AgentRow = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'pixel-agent': {
+    'pixel-agents': {
       mode: Mode
       frame: number
       label: string
@@ -22,11 +22,11 @@ declare module 'claude-code' {
       agents: AgentRow[]
       idleStart: number
       theme: string
-      // /pixel-agent theme auto: tema yerel saate göre kendiliğinden seçilir
+      // /pixel-agents theme auto: tema yerel saate göre kendiliğinden seçilir
       themeAuto: boolean
       // Bağlam doluluğu yüzdesi (0-100); -1: henüz ölçülmedi (taze oturum / compact sonrası)
       ctx: number
-      // Karakter seçim listesi açık mı (/pixel-agent switch)
+      // Karakter seçim listesi açık mı (/pixel-agents switch)
       picking: boolean
       // Alt ajanlar iki satıra açık mı; false: tek satır (Expand/Collapse düğmesi)
       miniExpanded: boolean
@@ -34,14 +34,14 @@ declare module 'claude-code' {
       statTurn: { startMs: number; startFrame: number; tools: number }
       // Uzun biten turun süresi (sn); -1: uzun değil / tur sürüyor
       statDone: number
-      // Oturum toplamları (/pixel-agent stats)
+      // Oturum toplamları (/pixel-agents stats)
       statTotals: { turns: number; tools: number; errors: number; workMs: number; byTool: Record<string, number> }
       // ---BAĞ-START---
       // Karakter id'sine göre bağ puanı (başarılı tur sayısı)
       bondPoints: Record<string, number>
       // Karakter id'sine göre seçili şapka id'si
       bondHats: Record<string, string>
-      // Şapka listesi açık mı (/pixel-agent hat)
+      // Şapka listesi açık mı (/pixel-agents hat)
       bondHatPicking: boolean
       // Uzun aradan dönüşte bantta kısa süre görünen metin
       bondWelcome: string
