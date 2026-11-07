@@ -1,6 +1,6 @@
 {
   "name": "pixel-agents",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "A pixel-art agent above your prompt that reacts to Claude Code, with a small companion for every running subagent.",
   "author": { "name": "diyojenyazilim" },
   "homepage": "https://github.com/diyojenyazilim/pixel-agents",
