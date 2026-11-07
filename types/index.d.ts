@@ -17,6 +17,8 @@ declare module 'claude-code' {
       mode: Mode
       frame: number
       label: string
+      // Ana oturumun ajan adı (settings "agent"); yoksa boş
+      mainAgent: string
       isHidden: boolean
       character: string
       agents: AgentRow[]

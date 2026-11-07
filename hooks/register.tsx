@@ -6,6 +6,8 @@ import type { AgentRow, Mode } from '../types'
 const mode = atom({ plugin: 'pixel-agents', key: 'mode' } as const, 'idle' as Mode)
 const frame = atom({ plugin: 'pixel-agents', key: 'frame' } as const, 0)
 const label = atom({ plugin: 'pixel-agents', key: 'label' } as const, '')
+// Ana oturumun ajan adı (settings "agent", örn. orchestrator); boşsa etikette karakter adı kalır
+const mainAgent = atom({ plugin: 'pixel-agents', key: 'mainAgent' } as const, '')
 const isHidden = atom({ plugin: 'pixel-agents', key: 'isHidden' } as const, false)
 const character = atom({ plugin: 'pixel-agents', key: 'character' } as const, 'bit')
 const agents = atom({ plugin: 'pixel-agents', key: 'agents' } as const, [] as AgentRow[])
@@ -994,14 +996,15 @@ const CROWN_TO = 10
 // Şapka pikselleri [x, y, renk] sprite koordinatında (dy eklenmeden). Şapka merkez
 // sütunlardaki ilk dolu satırın üstüne oturur (anten/sap varsa onun üstüne); üst kenar
 // tuvalin dışına çıkacaksa aşağı kayar ve yalnız boş piksele çizilir (sprite öndedir).
-function hatPixels(spec: Spec, hatId: string, dy: number): Array<[number, number, string]> {
-  const hat = HATS[hatId]
-  if (!hat || HAT_SKIP.has(spec.title)) return []
+// Şapka hangi sprite'a oturuyor: ana (14 geniş) ya da alt ajan boyu (10x10, 8 geniş)
+type HatTarget = { title: string; half: string[]; mini?: boolean }
 
-  let crown = spec.half.length
-  for (let r = 0; r < spec.half.length && crown === spec.half.length; r += 1) {
-    const full = mirror(spec.half[r] ?? '')
-    for (let c = CROWN_FROM; c < CROWN_TO; c += 1) {
+function crownRow({ half, mini }: HatTarget): number {
+  const [from, to] = mini ? [2, 6] : [CROWN_FROM, CROWN_TO]
+  let crown = half.length
+  for (let r = 0; r < half.length && crown === half.length; r += 1) {
+    const full = mirror(half[r] ?? '')
+    for (let c = from; c < to; c += 1) {
       if (full.charAt(c) !== '.') {
         crown = r
         break
@@ -1009,12 +1012,31 @@ function hatPixels(spec: Spec, hatId: string, dy: number): Array<[number, number
     }
   }
 
+  return crown
+}
+
+// Şapkanın tamamı görünsün diye sprite'ın inebileceği en az dy (baş boşluğu şapka yüksekliğinden
+// azsa zıplama/nefes dy'yi düşürüp şapkayı yarım keserdi)
+function hatMinDy(spec: HatTarget, hatId: string): number {
+  const hat = HATS[hatId]
+  if (!hat || HAT_SKIP.has(spec.title)) return 0
+
+  return Math.max(0, hat.rows.length - crownRow(spec))
+}
+
+function hatPixels(spec: HatTarget, hatId: string, dy: number): Array<[number, number, string]> {
+  const hat = HATS[hatId]
+  if (!hat || HAT_SKIP.has(spec.title)) return []
+
+  const crown = crownRow(spec)
   const top = Math.max(-dy, crown - hat.rows.length)
+  // Alt ajan sprite'ı 8 geniş: şapka ortalanır
+  const x = spec.mini ? (8 - (hat.rows[0]?.length ?? 0)) / 2 : hat.x
   const out: Array<[number, number, string]> = []
   hat.rows.forEach((row, r) => {
     for (let c = 0; c < row.length; c += 1) {
       const color = HAT_COLORS[row.charAt(c)]
-      if (color) out.push([hat.x + c, top + r, color])
+      if (color) out.push([x + c, top + r, color])
     }
   })
 
@@ -1316,6 +1338,7 @@ function compose(spec: Spec, m: Mode, f: number, o: ComposeOpts): Px[][] {
     dy = 1 - (f % 2)
   }
   dy = Math.max(0, dy - hareketLift(spec, m, o.idleTicks)) // HAREKET
+  if (o.hat) dy = Math.max(dy, hatMinDy(spec, o.hat)) // BAĞ: şapka tuvalin üstünden kesilmesin
   const dx = m === 'err' ? (f % 2 === 0 ? 0 : 2) : 1 + pose.wx
 
   const put = (x: number, y: number, c: Px) => {
@@ -1641,13 +1664,16 @@ function composeMini(
   slide: number,
   themeId: string,
   type?: string,
+  hat?: string,
 ): Px[][] {
   const spec = themed(pick(id), themeId)
   const mini = MINIS[id] ?? MINI_BIT
   const canvas: Px[][] = Array.from({ length: MH }, () => Array<Px>(MW).fill(undefined))
+  const hatOn: HatTarget = { title: spec.title, half: mini.half, mini: true }
 
   // Çalışan alt ajan seker, biten zıplar, hata alan titrer, bekleyen durur
-  const dy = slide !== 0 || m === 'work' ? 1 + (f % 2) : m === 'ok' ? f % 2 : 1
+  let dy = slide !== 0 || m === 'work' ? 1 + (f % 2) : m === 'ok' ? f % 2 : 1
+  if (hat) dy = Math.max(dy, hatMinDy(hatOn, hat)) // şapka tuvalin üstünden kesilmesin
   const dx = m === 'err' && slide === 0 ? (f % 2 === 0 ? 0 : 2) : 1 + slide
 
   const put = (x: number, y: number, c: Px) => {
@@ -1668,6 +1694,12 @@ function composeMini(
   })
 
   const ey = mini.eyeY
+
+  if (hat) {
+    for (const [hx, hy, hc] of hatPixels(hatOn, hat, dy)) {
+      if (canvas[dy + hy]?.[dx + hx] === undefined) px(hx, hy, hc)
+    }
+  }
 
   for (const ex of [2, 5]) {
     if (m === 'err') px(ex, ey, RED)
@@ -1754,8 +1786,6 @@ const STATUS: Record<Mode, string> = {
 }
 
 const ROWS = H / 2
-// Üstte 1 satır boşluk + altta 1 satır zemin çizgisi; yer yoksa ikisi atlanıp yalnız sprite çizilir
-const FRAMED_ROWS = ROWS + 2
 
 // Alt ajan adı en fazla bu kadar karakter gösterilir; daha uzunu kesilir
 const NAME_MAX = 24
@@ -1834,10 +1864,29 @@ function iconCanvas(kind: IconKind, f: number): Px[][] {
 
 const iconSvg = (kind: IconKind, f: number): string => svgOf(iconCanvas(kind, f), ICON, ICON_SCALE)
 
+// Terminal: durum ikonu sprite'ın sağına, sprite ile aynı yarım blok (▀) çizicisiyle basılır.
+// SVG ile aynı 8x8 bitmap'ler (iconCanvas); yalnız uyku terminalde iki Z ("zzz"), SVG hilali değişmez.
+// Sprite tuvaline (MH=10) dikey ortalı eklenir; ikon sütunu hep ICON geniş, ölçü durumla oynamaz.
+function withIcon(canvas: Px[][], kind: IconKind, f: number): Px[][] {
+  const icon = iconCanvas(kind, f)
+
+  if (kind === 'sleep') {
+    icon.forEach(row => row.fill(undefined))
+    for (const [ox, oy] of [[0, 4], [4, 0]] as const) {
+      for (const [gx, gy] of Z_PIXELS) {
+        const row = icon[oy + gy]
+        if (row) row[ox + gx] = ICON_MOON
+      }
+    }
+  }
+
+  return canvas.map((row, y) => [...row, ...Array.from({ length: ICON }, (_, x) => icon[y - 1]?.[x])])
+}
+
 // Terminalde SVG yok: durum yazı yerine tek hücrelik simge (çalışırken üç nokta döner)
 const TERM_ICONS: Record<Exclude<IconKind, 'work'>, { glyph: string; color: string }> = {
   ready: { glyph: '○', color: ICON_DIM },
-  sleep: { glyph: '☾', color: ICON_MOON },
+  sleep: { glyph: 'zzz', color: ICON_MOON },
   wait: { glyph: '⧖', color: ICON_DIM },
   ok: { glyph: '✓', color: ICON_GREEN },
   err: { glyph: '✗', color: RED },
@@ -2274,6 +2323,12 @@ export const register: Register = on => {
 
     await statReset($) // İSTATİSTİK: oturum sayaçları sıfırlanır
 
+    // Ana ajanın adı: birleşik ayarlardaki "agent" anahtarı; okunamazsa karakter adı gösterilir
+    const agentSetting = await $.settings.read({ key: 'agent' }).catch(() => undefined)
+    if (typeof agentSetting === 'string') {
+      await update($, mainAgent, () => agentSetting)
+    }
+
     // Önceki oturumda seçilen karakteri geri yükle
     const saved = await $.store.get('character')
     if (typeof saved === 'string' && ORDER.includes(saved)) {
@@ -2645,7 +2700,11 @@ export const register: Register = on => {
     const maxRows = e.props.maxRows
 
     // Band bu kadar yükseğe sığmıyorsa çizme (yarım karakter göstermesin)
-    if (e.props.hasSurvey || (maxRows !== undefined && maxRows < ROWS) || (await read($, isHidden))) {
+    // Terminalde ana karakter alt ajanlarla aynı boyda (MW x MH); SVG yüzeylerinde 14x14 sprite
+    const isTerminal = e.surface === 'terminal'
+    const bodyRows = isTerminal ? MH / 2 : ROWS
+
+    if (e.props.hasSurvey || (maxRows !== undefined && maxRows < bodyRows) || (await read($, isHidden))) {
       return next(e)
     }
 
@@ -2655,9 +2714,8 @@ export const register: Register = on => {
     if (columns < W_NARROW) return next(e)
 
     // Çerçeve (boşluk + zemin çizgisi) için yer yoksa yalnız sprite çizilir
-    const framed = maxRows === undefined || maxRows >= FRAMED_ROWS
+    const framed = maxRows === undefined || maxRows >= bodyRows + 2
     const cw = columns >= WIDE_MIN_COLUMNS ? W_WIDE : W_NARROW
-    const isTerminal = e.surface === 'terminal'
 
     const m = await read($, mode)
     const f = await read($, frame)
@@ -2680,13 +2738,25 @@ export const register: Register = on => {
     const isHatPicking = await read($, bondHatPicking)
     // ---BAĞ-END---
     const statDoneSec = await read($, statDone) // İSTATİSTİK
-    const canvas = compose(spec, m, f, { cw, idleTicks, tool, tired: pct >= CTX_TIRED, hat: bondHat,long: m === 'ok' && statDoneSec >= 0 })
-    const rows = Array.from({ length: ROWS }, (_, i) =>
-      rowRuns(canvas[i * 2] ?? [], canvas[i * 2 + 1] ?? [], cw),
-    )
     const roster = await read($, agents)
     const asleep = m === 'idle' && idleTicks >= SLEEP_AFTER
     const mainKind: IconKind = m === 'idle' ? (asleep ? 'sleep' : 'ready') : m
+    // Terminalde durum ikonu sprite'ın yanında piksel çizilir (yükseklik değişmez, genişlik ICON artar);
+    // geniş değilse (76 sütun altı) ad satırındaki tek hücrelik simgeye dönülür
+    const pixIcons = isTerminal && columns >= WIDE_MIN_COLUMNS
+    const sprite = isTerminal ? composeMini(characterId, m, f, 0, themeId, undefined, bondHat) : undefined
+    const canvas = sprite
+      ? pixIcons
+        ? withIcon(sprite, mainKind, f)
+        : sprite
+      : compose(spec, m, f, { cw, idleTicks, tool, tired: pct >= CTX_TIRED, hat: bondHat,long: m === 'ok' && statDoneSec >= 0 })
+    const gridW = isTerminal ? (pixIcons ? MW + ICON : MW) : cw
+    const rows = Array.from({ length: bodyRows }, (_, i) =>
+      rowRuns(canvas[i * 2] ?? [], canvas[i * 2 + 1] ?? [], gridW),
+    )
+    // Ana etiket: ana oturumun ajan adı (alt ajanlarla aynı kural: ":" sonrası, NAME_MAX'a kesilir);
+    // ajan adı yoksa karakter adı
+    const mainName = ((await read($, mainAgent)).split(':').pop() || spec.title).slice(0, NAME_MAX)
 
     // ---BALON-START---
     const balonRaw = balonText({
@@ -2700,10 +2770,13 @@ export const register: Register = on => {
     // ---BALON-END---
 
     // SVG yüzeylerinde ad ve konuşma balonu ana karakterin üstünde SVG etiket olarak durur
-    const nameTag = Svg ? nameLabel(spec.title) : undefined
+    const nameTag = Svg ? nameLabel(mainName) : undefined
     const bubbleTag = Svg ? bubbleLabel(iconCanvas(mainKind, f), balonRaw) : undefined
     // Ana sütun, sprite ve etiketlerin en genişi kadardır; Svg px, sağ sütun hücre hesabı için çevrilir
-    const mainCells = Svg ? Math.ceil(Math.max(cw * PX_MAIN, nameTag?.w ?? 0, bubbleTag?.w ?? 0) / CELL_PX) : cw
+    // Terminalde sütun, alt ajanlar gibi sprite ve ad (+ boşluk ve en çok 3 hücrelik simge) kadar geniştir
+    const mainCells = Svg
+      ? Math.ceil(Math.max(cw * PX_MAIN, nameTag?.w ?? 0, bubbleTag?.w ?? 0) / CELL_PX)
+      : Math.max(gridW, mainName.length + (pixIcons ? 0 : 4))
     // Sağ sütun ana sütundan kalan genişliktir; metinler sığmazsa sarılmaz, kesilir
     const rightW = Math.max(10, columns - mainCells - 2)
     // Üst boşluk: SVG yüzeylerinde ikon satırı için bir satır fazla; zemin çizgisi yalnız terminalde
@@ -2712,9 +2785,10 @@ export const register: Register = on => {
     // Alt ajanlı bant (üst satır + durum + sprite + ad + Random satırı) sığmıyorsa Random üst
     // satıra (Hide yanına) alınır ve sprite çizilmez; ajanlar "N agents running" diye özetlenir
     // Alt ajan yüksekliği satır cinsinden: terminalde sabit; SVG'de ikon + sprite piksel, ad bir satır
-    const miniH = Svg ? Math.ceil((ICON * ICON_SCALE + MH * PX_MINI) / SVG_ROW_PX) + 1 : MINI_ROWS
+    // Piksel ikonda durum sprite'ın yanındadır; üstteki durum satırı kalkar
+    const miniH = Svg ? Math.ceil((ICON * ICON_SCALE + MH * PX_MINI) / SVG_ROW_PX) + 1 : pixIcons ? MINI_ROWS - 1 : MINI_ROWS
     // SVG sprite 40 px (~6 hücre); terminalde 10 hücre
-    const miniMinW = Svg ? Math.ceil((MW * PX_MINI) / CELL_PX) : MW
+    const miniMinW = Svg ? Math.ceil((MW * PX_MINI) / CELL_PX) : pixIcons ? MW + ICON : MW
     const tight = roster.length > 0 && maxRows !== undefined && maxRows - frameRows < CHROME_ROWS + miniH
     const fitLines =
       maxRows === undefined
@@ -2776,7 +2850,9 @@ export const register: Register = on => {
     // Terminalde de ad sprite'ın üstündeki satırda, durum simge olarak; yer yoksa (framed değil)
     // ad ve simge başlıkta kalır. Durum yazısı ("ready", "working") hiçbir yüzeyde yazılmaz.
     const nameAbove = isTerminal && framed
-    const termIconEl = (
+    // Terminalde etkinlik, alt ajanlarla aynı simge setiyle (termIcon) gösterilir; araç aksesuarı çizilmez
+    // Piksel ikon (pixIcons) sprite'ın yanında olduğundan etikette simge yoktur
+    const termIconEl = pixIcons ? null : (
       <Text>
         {termIcon(mainKind, f).map((s, i) => (
           <Text key={`simge-${i}`} color={s.color}>
@@ -2794,7 +2870,7 @@ export const register: Register = on => {
         ) : null
       ) : (
         <Text wrap="truncate-end">
-          {`${spec.title} `}
+          {`${mainName} `}
           {termIconEl}
           {bondNote ? <Text dimColor>{` · ${bondNote}`}</Text> : null}
         </Text>
@@ -2828,8 +2904,10 @@ export const register: Register = on => {
           const left =
             a.endedFrame === undefined ? undefined : HOLD_TICKS - ((f - a.endedFrame + FRAME_WRAP) % FRAME_WRAP)
           const grid = composeMini(a.char, a.mode, f, miniSlide(since, left), themeId, a.type)
+          // Piksel ikonda durum ikonu sprite'ın sağına aynı çizicide basılır
+          const tgrid = pixIcons ? withIcon(grid, a.mode === 'idle' ? 'wait' : a.mode, f) : grid
           const miniRows = Array.from({ length: MH / 2 }, (_, i) =>
-            rowRuns(grid[i * 2] ?? [], grid[i * 2 + 1] ?? [], MW),
+            rowRuns(tgrid[i * 2] ?? [], tgrid[i * 2 + 1] ?? [], pixIcons ? MW + ICON : MW),
           )
 
           // Terminalde sütun, ad kadar geniş sabit hücre; Svg yüzeylerinde içeriğe göre.
@@ -2843,9 +2921,13 @@ export const register: Register = on => {
                   width={ICON * ICON_SCALE}
                   height={ICON * ICON_SCALE}
                 />
-              ) : (
-                <Text wrap="truncate-end" color={a.mode === 'err' ? RED : a.mode === 'work' ? AMBER : undefined} dimColor={a.mode === 'idle' || a.mode === 'ok'}>
-                  {SUB_STATUS[a.mode]}
+              ) : pixIcons ? null : (
+                <Text wrap="truncate-end">
+                  {termIcon(a.mode === 'idle' ? 'wait' : a.mode, f).map((s, i) => (
+                    <Text key={`simge-${i}`} color={s.color}>
+                      {s.glyph}
+                    </Text>
+                  ))}
                 </Text>
               )}
               {Svg ? (
@@ -2993,11 +3075,11 @@ export const register: Register = on => {
         <Box gap={2}>
           {/* Sprite sütunu sabit genişlikte; küçülürse satırlar sarılıp sprite kayar. SVG
               yüzeylerinde durum ikonu sprite'ın üstünde ortalanır */}
-          <Box flexDirection="column" flexShrink={0} alignItems="center" width={Svg ? undefined : cw}>
+          <Box flexDirection="column" flexShrink={0} alignItems="center" width={Svg ? undefined : mainCells}>
             {/* Terminalde üstteki boş satır yerine ad + durum simgesi */}
             {nameAbove ? (
               <Text key="ad" wrap="truncate">
-                <Text bold>{`${spec.title} `}</Text>
+                <Text bold>{`${mainName} `}</Text>
                 {termIconEl}
               </Text>
             ) : null}
