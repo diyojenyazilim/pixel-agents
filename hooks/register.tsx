@@ -1864,26 +1864,7 @@ function iconCanvas(kind: IconKind, f: number): Px[][] {
 
 const iconSvg = (kind: IconKind, f: number): string => svgOf(iconCanvas(kind, f), ICON, ICON_SCALE)
 
-// Terminal: durum ikonu sprite'ın sağına, sprite ile aynı yarım blok (▀) çizicisiyle basılır.
-// SVG ile aynı 8x8 bitmap'ler (iconCanvas); yalnız uyku terminalde iki Z ("zzz"), SVG hilali değişmez.
-// Sprite tuvaline (MH=10) dikey ortalı eklenir; ikon sütunu hep ICON geniş, ölçü durumla oynamaz.
-function withIcon(canvas: Px[][], kind: IconKind, f: number): Px[][] {
-  const icon = iconCanvas(kind, f)
-
-  if (kind === 'sleep') {
-    icon.forEach(row => row.fill(undefined))
-    for (const [ox, oy] of [[0, 4], [4, 0]] as const) {
-      for (const [gx, gy] of Z_PIXELS) {
-        const row = icon[oy + gy]
-        if (row) row[ox + gx] = ICON_MOON
-      }
-    }
-  }
-
-  return canvas.map((row, y) => [...row, ...Array.from({ length: ICON }, (_, x) => icon[y - 1]?.[x])])
-}
-
-// Terminalde SVG yok: durum yazı yerine tek hücrelik simge (çalışırken üç nokta döner)
+// Terminalde SVG yok: tek hücrelik simge (çalışırken üç nokta döner); ana ajanda yanında kısa durum yazısı
 const TERM_ICONS: Record<Exclude<IconKind, 'work'>, { glyph: string; color: string }> = {
   ready: { glyph: '○', color: ICON_DIM },
   sleep: { glyph: 'zzz', color: ICON_MOON },
@@ -2708,13 +2689,15 @@ export const register: Register = on => {
       return next(e)
     }
 
-    const columns = e.props.bodyColumns ?? 100
+    // Çerçeve için yer yoksa yalnız sprite çizilir. Terminalde çerçeve: üst + alt kenar (2) ve
+    // üst boşluk (1) ile ad satırı (1) = bodyRows + 4; SVG yüzeylerinde boşluk satırları (2)
+    // Durum satırı ile sprite/şapka arasına bir boş satır daha girer: terminalde bodyRows + 5
+    const framed = maxRows === undefined || maxRows >= bodyRows + (isTerminal ? 6 : 2)
+    // Terminal çerçevesi yanlardan 2 kenar + 2 iç boşluk = 4 sütun yer; yerleşim iç genişliğe göre
+    const columns = (e.props.bodyColumns ?? 100) - (isTerminal && framed ? 4 : 0)
 
     // Sprite'ın kendi genişliğine bile sığmıyorsa çizme; sığmayan satır sarılıp kayardı
     if (columns < W_NARROW) return next(e)
-
-    // Çerçeve (boşluk + zemin çizgisi) için yer yoksa yalnız sprite çizilir
-    const framed = maxRows === undefined || maxRows >= bodyRows + 2
     const cw = columns >= WIDE_MIN_COLUMNS ? W_WIDE : W_NARROW
 
     const m = await read($, mode)
@@ -2741,16 +2724,11 @@ export const register: Register = on => {
     const roster = await read($, agents)
     const asleep = m === 'idle' && idleTicks >= SLEEP_AFTER
     const mainKind: IconKind = m === 'idle' ? (asleep ? 'sleep' : 'ready') : m
-    // Terminalde durum ikonu sprite'ın yanında piksel çizilir (yükseklik değişmez, genişlik ICON artar);
-    // geniş değilse (76 sütun altı) ad satırındaki tek hücrelik simgeye dönülür
-    const pixIcons = isTerminal && columns >= WIDE_MIN_COLUMNS
-    const sprite = isTerminal ? composeMini(characterId, m, f, 0, themeId, undefined, bondHat) : undefined
-    const canvas = sprite
-      ? pixIcons
-        ? withIcon(sprite, mainKind, f)
-        : sprite
+    // Terminalde durum küçük bir simge + kısa yazı (başlıkta), sprite'ın yanında büyük piksel ikon yok
+    const canvas = isTerminal
+      ? composeMini(characterId, m, f, 0, themeId, undefined, bondHat)
       : compose(spec, m, f, { cw, idleTicks, tool, tired: pct >= CTX_TIRED, hat: bondHat,long: m === 'ok' && statDoneSec >= 0 })
-    const gridW = isTerminal ? (pixIcons ? MW + ICON : MW) : cw
+    const gridW = isTerminal ? MW : cw
     const rows = Array.from({ length: bodyRows }, (_, i) =>
       rowRuns(canvas[i * 2] ?? [], canvas[i * 2 + 1] ?? [], gridW),
     )
@@ -2769,6 +2747,8 @@ export const register: Register = on => {
     })
     // ---BALON-END---
 
+    const base = asleep ? 'sleeping' : m === 'work' && tool ? `${STATUS[m]} · ${tool}` : STATUS[m]
+
     // SVG yüzeylerinde ad ve konuşma balonu ana karakterin üstünde SVG etiket olarak durur
     const nameTag = Svg ? nameLabel(mainName) : undefined
     const bubbleTag = Svg ? bubbleLabel(iconCanvas(mainKind, f), balonRaw) : undefined
@@ -2776,19 +2756,19 @@ export const register: Register = on => {
     // Terminalde sütun, alt ajanlar gibi sprite ve ad (+ boşluk ve en çok 3 hücrelik simge) kadar geniştir
     const mainCells = Svg
       ? Math.ceil(Math.max(cw * PX_MAIN, nameTag?.w ?? 0, bubbleTag?.w ?? 0) / CELL_PX)
-      : Math.max(gridW, mainName.length + (pixIcons ? 0 : 4))
+      : Math.max(gridW, Math.min(NAME_MAX, Math.max(mainKind === 'work' || mainKind === 'sleep' ? 3 : 1, base.length)))
     // Sağ sütun ana sütundan kalan genişliktir; metinler sığmazsa sarılmaz, kesilir
     const rightW = Math.max(10, columns - mainCells - 2)
     // Üst boşluk: SVG yüzeylerinde ikon satırı için bir satır fazla; zemin çizgisi yalnız terminalde
     const topGap = Svg ? 2 : 1
-    const frameRows = framed ? topGap + (isTerminal ? 1 : 0) : 0
+    const frameRows = framed ? topGap + (isTerminal ? 5 : 0) : 0
     // Alt ajanlı bant (üst satır + durum + sprite + ad + Random satırı) sığmıyorsa Random üst
     // satıra (Hide yanına) alınır ve sprite çizilmez; ajanlar "N agents running" diye özetlenir
     // Alt ajan yüksekliği satır cinsinden: terminalde sabit; SVG'de ikon + sprite piksel, ad bir satır
     // Piksel ikonda durum sprite'ın yanındadır; üstteki durum satırı kalkar
-    const miniH = Svg ? Math.ceil((ICON * ICON_SCALE + MH * PX_MINI) / SVG_ROW_PX) + 1 : pixIcons ? MINI_ROWS - 1 : MINI_ROWS
+    const miniH = Svg ? Math.ceil((ICON * ICON_SCALE + MH * PX_MINI) / SVG_ROW_PX) + 1 : MINI_ROWS
     // SVG sprite 40 px (~6 hücre); terminalde 10 hücre
-    const miniMinW = Svg ? Math.ceil((MW * PX_MINI) / CELL_PX) : pixIcons ? MW + ICON : MW
+    const miniMinW = Svg ? Math.ceil((MW * PX_MINI) / CELL_PX) : MW
     const tight = roster.length > 0 && maxRows !== undefined && maxRows - frameRows < CHROME_ROWS + miniH
     const fitLines =
       maxRows === undefined
@@ -2843,38 +2823,36 @@ export const register: Register = on => {
         }`
       : ''
 
-    const base = asleep ? 'sleeping' : m === 'work' && tool ? `${STATUS[m]} · ${tool}` : STATUS[m]
-
     // SVG yüzeylerinde ad, durum ve balon ana karakterin üstündeki etiketlerde; sağ üstte süre,
     // araç sayısı veya ad yazılmaz (yalnız varsa karşılama notu). Terminalde başlık yazıyla kalır.
     // Terminalde de ad sprite'ın üstündeki satırda, durum simge olarak; yer yoksa (framed değil)
     // ad ve simge başlıkta kalır. Durum yazısı ("ready", "working") hiçbir yüzeyde yazılmaz.
     const nameAbove = isTerminal && framed
     // Terminalde etkinlik, alt ajanlarla aynı simge setiyle (termIcon) gösterilir; araç aksesuarı çizilmez
-    // Piksel ikon (pixIcons) sprite'ın yanında olduğundan etikette simge yoktur
-    const termIconEl = pixIcons ? null : (
+    // Terminalde durum: küçük simge + kısa yazı ("○ ready", "● working · Read") başlıkta
+    const termIconEl = (
       <Text>
         {termIcon(mainKind, f).map((s, i) => (
           <Text key={`simge-${i}`} color={s.color}>
             {s.glyph}
           </Text>
         ))}
+        <Text dimColor>{` ${base}`}</Text>
       </Text>
     )
-    const header =
-      Svg || nameAbove ? (
-        bondNote ? (
-          <Text dimColor wrap="truncate-end">
-            {bondNote}
-          </Text>
-        ) : null
-      ) : (
-        <Text wrap="truncate-end">
-          {`${mainName} `}
-          {termIconEl}
-          {bondNote ? <Text dimColor>{` · ${bondNote}`}</Text> : null}
+    // Ana ajanın adı terminalde yazılmaz; durum framed ise sprite'ın üstünde, değilse başlıkta
+    const header = Svg || nameAbove ? (
+      bondNote ? (
+        <Text dimColor wrap="truncate-end">
+          {bondNote}
         </Text>
-      )
+      ) : null
+    ) : (
+      <Text wrap="truncate-end">
+        {termIconEl}
+        {bondNote ? <Text dimColor>{` · ${bondNote}`}</Text> : null}
+      </Text>
+    )
 
     const hideButton = <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
     const randomButton = (
@@ -2904,10 +2882,8 @@ export const register: Register = on => {
           const left =
             a.endedFrame === undefined ? undefined : HOLD_TICKS - ((f - a.endedFrame + FRAME_WRAP) % FRAME_WRAP)
           const grid = composeMini(a.char, a.mode, f, miniSlide(since, left), themeId, a.type)
-          // Piksel ikonda durum ikonu sprite'ın sağına aynı çizicide basılır
-          const tgrid = pixIcons ? withIcon(grid, a.mode === 'idle' ? 'wait' : a.mode, f) : grid
           const miniRows = Array.from({ length: MH / 2 }, (_, i) =>
-            rowRuns(tgrid[i * 2] ?? [], tgrid[i * 2 + 1] ?? [], pixIcons ? MW + ICON : MW),
+            rowRuns(grid[i * 2] ?? [], grid[i * 2 + 1] ?? [], MW),
           )
 
           // Terminalde sütun, ad kadar geniş sabit hücre; Svg yüzeylerinde içeriğe göre.
@@ -2921,7 +2897,7 @@ export const register: Register = on => {
                   width={ICON * ICON_SCALE}
                   height={ICON * ICON_SCALE}
                 />
-              ) : pixIcons ? null : (
+              ) : (
                 <Text wrap="truncate-end">
                   {termIcon(a.mode === 'idle' ? 'wait' : a.mode, f).map((s, i) => (
                     <Text key={`simge-${i}`} color={s.color}>
@@ -2991,7 +2967,7 @@ export const register: Register = on => {
           <Box flexShrink={1}>{header}</Box>
           <Box gap={2} flexShrink={0}>
             {tight ? randomButton : null}
-            {hideButton}
+            {isTerminal ? null : hideButton /* terminalde ana bilgisayarın [-] düğmesi var */}
           </Box>
         </Box>
         {lines.length > 0 ? <Box flexDirection="column">{minis}</Box> : null}
@@ -3067,10 +3043,12 @@ export const register: Register = on => {
     ) : null
     // ---BAĞ-END---
 
-    const rule = '─'.repeat(Math.min(columns, 100))
-
     return (
-      <Box flexDirection="column" marginTop={framed ? (nameAbove ? topGap - 1 : topGap) : 0}>
+      <Box
+        flexDirection="column"
+        marginTop={framed ? (nameAbove ? topGap - 1 : topGap) : 0}
+        {...(nameAbove ? { borderStyle: 'round', borderDimColor: true, paddingX: 1, paddingTop: 1 } : {})}
+      >
         {/* Varsayılan stretch: sağ sütun sprite yüksekliğine uzar; Hide üstte, Random altta kalır */}
         <Box gap={2}>
           {/* Sprite sütunu sabit genişlikte; küçülürse satırlar sarılıp sprite kayar. SVG
@@ -3078,11 +3056,24 @@ export const register: Register = on => {
           <Box flexDirection="column" flexShrink={0} alignItems="center" width={Svg ? undefined : mainCells}>
             {/* Terminalde üstteki boş satır yerine ad + durum simgesi */}
             {nameAbove ? (
-              <Text key="ad" wrap="truncate">
-                <Text bold>{`${mainName} `}</Text>
-                {termIconEl}
-              </Text>
+              // İçeriğe göre boyutlanan grup sütunda ortalanır; simge satırı ön boşlukla yazının
+              // orta noktasına hizalanır (flex ortalaması tek/çift farkında ve host'ta güvenilmez)
+              <Box flexDirection="column" alignItems="flex-start" flexShrink={0}>
+                <Text key="durum-simge" wrap="truncate">
+                  {' '.repeat(Math.max(0, Math.floor((base.length - termIcon(mainKind, f).reduce((n, s) => n + s.glyph.length, 0)) / 2)))}
+                  {termIcon(mainKind, f).map((s, i) => (
+                    <Text key={`simge-${i}`} color={s.color}>
+                      {s.glyph}
+                    </Text>
+                  ))}
+                </Text>
+                <Text key="durum-yazi" dimColor wrap="truncate">
+                  {base}
+                </Text>
+              </Box>
             ) : null}
+            {/* Durum ile sprite/şapka arasında tam bir boş satır; şapka tuval içinde çizilir (hatMinDy) */}
+            {nameAbove ? <Box height={1} /> : null}
             {Svg ? (
               <Box flexDirection="column" alignItems="center">
                 {nameTag ? <Svg source={nameTag.svg} alt={spec.title} width={nameTag.w} height={nameTag.h} /> : null}
@@ -3107,7 +3098,6 @@ export const register: Register = on => {
         </Box>
         {picker}
         {hatPicker}
-        {framed && isTerminal ? <Text dimColor wrap="truncate">{rule}</Text> : null}
       </Box>
     )
   })
